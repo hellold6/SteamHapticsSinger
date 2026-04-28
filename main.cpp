@@ -32,6 +32,9 @@ struct ParamsStruct{
 	bool repeatSong;
 };
 
+//TEMPORARY, move to ParamsStruct and find a way to reference within playback function
+bool legacyInst = false;
+
 struct SteamControllerInfos{
 	libusb_device_handle* dev_handle;
 	int interfaceNum;
@@ -129,7 +132,7 @@ int SteamHaptics_PlayNote(SteamControllerInfos* controller, int haptic, int note
 	double frequency = midiFrequency[note];
 	uint16_t duration = (note == NOTE_STOP) ? 0x0000 : 0x7fff;
 
-	if(controller->isNew) {
+	if(!legacyInst or controller->isNew) {
 		//New Haptic Playback
 		dataBlob[0] = 0xEA;
 		dataBlob[2] = !haptic;
@@ -327,6 +330,9 @@ bool parseArguments(int argc, char** argv, ParamsStruct* params){
 			if(value <= 1000000 && value > 0){
 				params->intervalUSec = value;
 			}
+			break;
+		case 'g':
+			legacyInst = true;
 			break;
 		case 'r':
 			params->repeatSong = true;
