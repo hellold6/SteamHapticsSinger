@@ -16,15 +16,13 @@ I gotta say, I'm no expert and barely know how this thing works, but I hope to a
 Songs ready to play can be found in the original guy's [personal collection](https://mega.nz/#F!BWpEWKzB!r7WPw5bZ_domN4pk-FJsjg) (as he called it). Otherwise, you can just try a MIDI and see what happens (most of the time it won't work well).
 
 ### Usage from command prompt:
-	steam-haptics-singer [-r][-l DEBUG_LEVEL] [-i INTERVAL] [-c RECLAIM_PERIOD] MIDI_FILE
+	steam-haptics-singer [-r] [-l DEBUG_LEVEL] [-i INTERVAL] MIDI_FILE
 
 	-i INTERVAL argument to choose player sleep interval (in microseconds). Lower generally means better song fidelity, but higher cpu usage, and at some point goidn lower won't improve any more. Default value is 10000
 
 	-l DEBUG_LEVEL argument to choose libusb debug level. Default is 0, no debug output. max is 4, max verbosity output
 	
 	-r to enable repeat mode, which plays continously (restart the song when finished)
-	
-	-c RECLAIM_PERIOD will change the default reclaiming period (2 seconds). A greater period will reduce notes hanging, but will also increase the probability of losing the control of the controller, depending on the song. All songs are known to fail with reclaim period over 5. After a failed attempt, you will need to reconnect the controller.
 
 ### Midi files tips:
 
