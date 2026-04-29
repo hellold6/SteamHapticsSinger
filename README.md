@@ -45,6 +45,7 @@ If you go the steam-runtime route, make sure to use sniper as scout is outdated.
 	git clone -b master https://github.com/CrazyCritic89/SteamHapticsSinger.git
 	cd SteamHapticsSinger
 	podman run --rm -v ./:/src -it registry.gitlab.steamos.cloud/steamrt/sniper/sdk bash
+	cd src
 	make
 	exit
 
