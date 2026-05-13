@@ -415,7 +415,9 @@ int main(int argc, char** argv)
 
 
 	//Initializing LIBUSB
-	int r = libusb_init(NULL);
+	libusb_context * ctx = NULL;
+	int r = libusb_init(&ctx);
+	libusb_set_option(ctx, LIBUSB_OPTION_USE_USBDK);
 	if(r < 0) {
 		cout<<"LIBUSB Init Error "<<r<<endl;
 		std::cin.ignore();
