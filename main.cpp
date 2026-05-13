@@ -166,7 +166,7 @@ int SteamHaptics_PlayNote(SteamControllerInfos* controller, int haptic, int note
 	case ControllerType::Triton: //Steam Controller (2026) Playback
 
 		dataBlob[0] = 0x83;
-		dataBlob[1] = haptic;
+		dataBlob[1] = !haptic; //Swap haptics to match 2015
 		dataBlob[2] = 0xFE;
 		dataBlob[3] = (int)frequency % 0xFF;
 		dataBlob[4] = (int)frequency / 0xFF;
@@ -180,8 +180,8 @@ int SteamHaptics_PlayNote(SteamControllerInfos* controller, int haptic, int note
 	case ControllerType::Jupiter: //Steam Deck Playback
 	
 		dataBlob[0] = 0xEA;
-		dataBlob[2] = !haptic;
-		dataBlob[3] = 0x03;
+		dataBlob[2] = !haptic; //Swap haptics to match 2015
+		dataBlob[3] = 0x03; 
 		dataBlob[5] = 0x7F;
 		dataBlob[6] = (int)frequency % 0xFF;
 		dataBlob[7] = (int)frequency / 0xFF;
