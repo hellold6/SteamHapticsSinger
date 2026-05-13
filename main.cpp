@@ -35,11 +35,19 @@ struct ParamsStruct{
 //TEMPORARY, move to ParamsStruct and find a way to reference within playback function
 bool legacyInst = false;
 
+enum class ControllerType {
+	None,
+	Original,
+	Triton,
+	Jupiter,
+	Galileo
+};
+
 struct SteamControllerInfos{
 	libusb_device_handle* dev_handle;
 	int interfaceNum;
 
-	bool isNew;
+	ControllerType type = ControllerType::None;
 	signed char leftGain;
 	signed char rightGain;
 };
@@ -56,26 +64,26 @@ bool SteamController_Open(SteamControllerInfos* controller){
 		cout<<"Found wired Steam Controller (2015)"<<endl;
 		controller->dev_handle = dev_handle;
 		controller->interfaceNum = 2;
-		controller->isNew = false;
+		controller->type = ControllerType::Original;
 	}
 	else if((dev_handle = libusb_open_device_with_vid_pid(NULL, 0x28DE, 0x1142)) != NULL){ // Steam Controller (2015) dongle //TODO: FIX
 		cout<<"Found Steam Dongle, will attempt to use the first Steam Controller (2015)"<<endl;
 		controller->dev_handle = dev_handle;
 		controller->interfaceNum = 1;
-		controller->isNew = false;
+		controller->type = ControllerType::Original;
 	} 
+	else if((dev_handle = libusb_open_device_with_vid_pid(NULL, 0x28DE, 0x1302)) != NULL){ // Steam Controller (2026)
+		cout<<"Found wired Steam Controller (2026)"<<endl;
+		controller->dev_handle = dev_handle;
+		controller->interfaceNum = 0;
+		controller->type = ControllerType::Triton;
+	}
 	else if((dev_handle = libusb_open_device_with_vid_pid(NULL, 0x28DE, 0x1205)) != NULL){ // Steam Deck
 		cout<<"Found Steam Deck"<<endl;
 		controller->dev_handle = dev_handle;
 		controller->interfaceNum = 2;
-		controller->isNew = true;
+		controller->type = ControllerType::Jupiter;
 	}
-	// else if((dev_handle = libusb_open_device_with_vid_pid(NULL, 0x28DE, 0x0000)) != NULL){ // Steam Controller (2026)
-	// 	cout<<"Found wired Steam Controller (2026)"<<endl;
-	// 	controller->dev_handle = dev_handle;
-	// 	controller->interfaceNum = 2;
-	// 	controller->isNew = true;
-	// }
 	else{
 		cout<<"No device found"<<endl;
 		return false;
@@ -111,40 +119,23 @@ void SteamController_Close(SteamControllerInfos* controller){
 
 //Steam Haptics Playblack
 int SteamHaptics_PlayNote(SteamControllerInfos* controller, int haptic, int note){
-	unsigned char dataBlob[64] = {0xEA, //0x8F for Steam Controller, 0xEA for Steam Deck
-	                              0x00,
-	                              0x00, //Trackpad Select: 0x01 = Left, 0x00 = Right; 0x02 = Both but is only on Deck and is not used. The select is also flipped incode for Deck.
-	                              0x03, //Command Type			LSB Pulse High Duration			(What is command type? This haptic command is used for everything related to haptics, such as startup haptics. To implement them, they have a "type" selector. Type 3 is used since it corresponds to note playback.)
-	                              0x00, //						MSB Pulse High Duration
-	                              0x00, //DB Gain				LSB Pulse Low Duration							
-	                              0x00, //LSB Frequency			MSB Pulse Low Duration		
-	                              0x00, //MSB Frequency			LSB Pulse repeat count					
-	                              0x00, //LSB Duration			MSB Pulse repeat count
-	                              0x00, //MSB Duration			LSB DB Gain 
-	                              0x00, 0x00, //				MSB DB Gain 
-	                              0x00, //LSB LFO Frequency
-	                              0x00, //MSB LFO Frequency
-	                              0x00, //LFO Depth
-	                              0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	                              0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	                              0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+	unsigned char dataBlob[16] = {0};
 	
 	double frequency = midiFrequency[note];
 	uint16_t duration = (note == NOTE_STOP) ? 0x0000 : 0x7fff;
 
-	if(!legacyInst && controller->isNew) {
-		//New Haptic Playback
-		dataBlob[0] = 0xEA;
-		dataBlob[2] = !haptic;
-		dataBlob[6] = (int)frequency % 0xFF;
-		dataBlob[7] = (int)frequency / 0xFF;
-		dataBlob[8] = duration % 0xFF;
-		dataBlob[9] = duration / 0xFF;
-	} else {
-		//Legacy Haptic Playback
-		double period = 1.0 / frequency;
-		uint16_t periodCommand = period * STEAM_CONTROLLER_MAGIC_PERIOD_RATIO; //Reminder to check if the Steam Controller tuning lines up with the Deck.
-		uint16_t repeatCommand = (note == NOTE_STOP) ? 0x0000 : 0x7fff;
+	int r;
+
+	double period;
+	uint16_t periodCommand;
+	uint16_t repeatCommand;
+
+	switch(controller->type) {
+	case ControllerType::Original: //Steam Controller (2015) Playback
+
+		period = 1.0 / frequency;
+		periodCommand = period * STEAM_CONTROLLER_MAGIC_PERIOD_RATIO; //Reminder to check if the Steam Controller tuning lines up with the Deck.
+		repeatCommand = (note == NOTE_STOP) ? 0x0000 : 0x7fff;
 
 		dataBlob[0] = 0x8F;
 		dataBlob[2] = haptic;
@@ -154,13 +145,41 @@ int SteamHaptics_PlayNote(SteamControllerInfos* controller, int haptic, int note
 		dataBlob[6] = periodCommand / 0xFF;
 		dataBlob[7] = repeatCommand % 0xFF;
 		dataBlob[8] = repeatCommand / 0xFF;
-	}
+		r = libusb_control_transfer(controller->dev_handle,0x21,9,0x0300,2,dataBlob,64,1000);
+		if(r < 0) {
+			cout<<"Command Error "<<r<< endl;
+			exit(0);
+		}
+		break;
 
-	int r;
-	r = libusb_control_transfer(controller->dev_handle,0x21,9,0x0300,2,dataBlob,64,1000);
-	if(r < 0) {
-		cout<<"Command Error "<<r<< endl;
-		exit(0);
+	case ControllerType::Triton: //Steam Controller (2026) Playback
+
+		dataBlob[0] = 0x83;
+		dataBlob[1] = haptic;
+		dataBlob[2] = 0xFF;
+		dataBlob[3] = (int)frequency % 0xFF;
+		dataBlob[4] = (int)frequency / 0xFF;
+		r = libusb_interrupt_transfer(controller->dev_handle,0x01,dataBlob,16,NULL,1000);
+		if(r < 0) {
+			cout<<"Command Error "<<r<< endl;
+			exit(0);
+		}
+		break;
+
+	case ControllerType::Jupiter: //Steam Deck Playback
+	
+		dataBlob[0] = 0xEA;
+		dataBlob[2] = !haptic;
+		dataBlob[6] = (int)frequency % 0xFF;
+		dataBlob[7] = (int)frequency / 0xFF;
+		dataBlob[8] = duration % 0xFF;
+		dataBlob[9] = duration / 0xFF;
+		r = libusb_control_transfer(controller->dev_handle,0x21,9,0x0300,2,dataBlob,64,1000);
+		if(r < 0) {
+			cout<<"Command Error "<<r<< endl;
+			exit(0);
+		}
+		break;
 	}
 
 	return 0;
