@@ -116,6 +116,8 @@ jobs:
             mingw-w64-ucrt-x86_64-clang
             mingw-w64-ucrt-x86_64-lld
             mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-clang-aarch64-headers
+            mingw-w64-clang-aarch64-crt
             mingw-w64-clang-aarch64-libusb
             mingw-w64-clang-aarch64-hidapi
 
@@ -127,9 +129,9 @@ jobs:
           make steam-haptics-singer.exe \
             CC=clang \
             CXX=clang++ \
-            CFLAGS="--target=aarch64-w64-windows-gnu" \
-            CXXFLAGS="--target=aarch64-w64-windows-gnu -fuse-ld=lld" \
-            LDFLAGS="--target=aarch64-w64-windows-gnu -fuse-ld=lld"
+            CFLAGS="--target=aarch64-w64-windows-gnu --sysroot=/clangarm64" \
+            CXXFLAGS="--target=aarch64-w64-windows-gnu --sysroot=/clangarm64 -fuse-ld=lld" \
+            LDFLAGS="--target=aarch64-w64-windows-gnu --sysroot=/clangarm64 -fuse-ld=lld"
 
       - name: Bundle DLLs
         shell: msys2 {0}
