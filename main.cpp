@@ -537,9 +537,10 @@ bool captureSystemAudioToMidi(const ParamsStruct& params, std::string& generated
 		return false;
 	}
 
+	std::string wasapiDevice = params.winAudioDevice.empty() ? "loopback" : params.winAudioDevice;
 	if(!runCommand({"ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-	                "-f", "wasapi", "-loopback", "1",
-	                "-i", params.winAudioDevice,
+	                "-f", "wasapi",
+	                "-i", wasapiDevice,
 	                "-t", std::to_string(params.captureDurationSec), tempAudioPath})){
 		cout << "Audio capture failed. Ensure ffmpeg is installed.\n"
 		     << "  WASAPI loopback capture requires Windows 7 or later.\n"
