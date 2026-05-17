@@ -31,8 +31,9 @@ steam-haptics-singer-arm64.exe: main.cpp midifile/midifile.c
 		-I/clangarm64/include/libusb-1.0 \
 		-fuse-ld=lld \
 		-L/clangarm64/lib \
-		-o steam-haptics-singer-arm64.exe main.cpp midifile.o \
+		-o steam-haptics-singer.exe main.cpp midifile.o \
 		-lusb-1.0 -lhidapi
+	cp steam-haptics-singer.exe steam-haptics-singer-arm64.exe
 
 clean:
 	rm -f steam-haptics-singer steam-haptics-singer.exe steam-haptics-singer-arm64.exe midifile.o
