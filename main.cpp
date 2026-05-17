@@ -537,12 +537,14 @@ bool captureSystemAudioToMidi(const ParamsStruct& params, std::string& generated
 		return false;
 	}
 
-	std::string audioDevice = "audio=" + params.winAudioDevice;
-	if(!runCommand({"ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "dshow", "-i", audioDevice, "-t", std::to_string(params.captureDurationSec), tempAudioPath})){
-		cout << "Audio capture failed. Ensure ffmpeg is installed and the loopback audio device \"" << params.winAudioDevice << "\" is enabled in Windows Sound settings.\n"
-		     << "  Common device names: \"Stereo Mix\", \"What U Hear\", \"Wave Out Mix\" (varies by driver).\n"
-		     << "  Use 'ffmpeg -f dshow -list_devices true -i dummy' to list available devices,\n"
-		     << "  then pass the correct device name with -w \"Device Name\"." << endl;
+	if(!runCommand({"ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+	                "-f", "wasapi", "-loopback", "1",
+	                "-i", params.winAudioDevice,
+	                "-t", std::to_string(params.captureDurationSec), tempAudioPath})){
+		cout << "Audio capture failed. Ensure ffmpeg is installed.\n"
+		     << "  WASAPI loopback capture requires Windows 7 or later.\n"
+		     << "  To capture from a specific device, use -w \"Device Name\".\n"
+		     << "  Run 'ffmpeg -f wasapi -list_devices true -i dummy' to list available devices." << endl;
 		DeleteFileA(tempAudioPath.c_str());
 		removeDirectoryRecursively(tempMidiDirectory);
 		return false;
@@ -827,8 +829,8 @@ int main(int argc, char** argv)
 	params.captureSystemAudio = false;
 	params.volume = 1.0f;
 #ifdef _WIN32
-	// Most common loopback device name on systems with Realtek audio; override with -w if different.
-	params.winAudioDevice = "Stereo Mix (Realtek High Definition Audio)";
+	// Empty string = default output device for WASAPI loopback; override with -w for a specific device.
+	params.winAudioDevice = "";
 #endif
 	//params.leftGain = DEFAULT_GAIN;
 	//params.rightGain = DEFAULT_GAIN;
@@ -837,7 +839,7 @@ int main(int argc, char** argv)
 	//Parse arguments
 	if(!parseArguments(argc, argv, &params)){
 		cout << "Usage: steam-haptics-singer -a SECONDS [-o OUTPUT_MIDI] [options]\n"
-			  "\n  -a SECONDS      Capture system audio for N seconds and transcribe it to MIDI before playback (Linux: PulseAudio; Windows: DirectShow/Stereo Mix)"
+			  "\n  -a SECONDS      Capture system audio for N seconds and transcribe it to MIDI before playback (Linux: PulseAudio; Windows: WASAPI loopback)"
 			  "\n  -o OUTPUT_MIDI  Output path for generated MIDI. Default: captured-audio.mid"
 			  "\n  -i INTERVAL     Player sleep interval (in microseconds). Default: 10000"
 			  "\n  -d DEBUG_LEVEL  Libusb debug level (0-4). Default: 0"
@@ -847,8 +849,8 @@ int main(int argc, char** argv)
 			  "\n  -t              (Steam Controller 2026 Only) Limit to only two channels"
 			  "\n  -s              (Steam Controller 2026 Only) Swap rumble and trackpad channels"
 #ifdef _WIN32
-			  "\n  -w DEVICE_NAME  (Windows) DirectShow audio device name for system audio capture. Default: \"Stereo Mix (Realtek High Definition Audio)\""
-			  "\n                   Run 'ffmpeg -f dshow -list_devices true -i dummy' to list available devices."
+			  "\n  -w DEVICE_NAME  (Windows) WASAPI render device name for audio capture. Default: system default output"
+			  "\n                   Run 'ffmpeg -f wasapi -list_devices true -i dummy' to list available devices."
 #endif
 			  "" << endl;
 		return 1;
