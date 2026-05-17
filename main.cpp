@@ -274,7 +274,7 @@ bool runCommand(const std::vector<std::string>& commandArgs){
 	for(const std::string& arg : commandArgs){
 		argv.push_back(const_cast<char*>(arg.c_str()));
 	}
-	argv.push_back(NULL);
+	argv.push_back(nullptr);
 
 	pid_t pid = fork();
 	if(pid < 0) return false;
@@ -336,14 +336,14 @@ bool captureSystemAudioToMidi(const ParamsStruct& params, std::string& generated
 	if(!runCommand({"ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "pulse", "-i", "default", "-t", std::to_string(params.captureDurationSec), tempAudioPath})){
 		cout << "Audio capture failed. Ensure ffmpeg is installed and system audio capture is accessible." << endl;
 		unlink(tempAudioPath.c_str());
-		rmdir(tempMidiDirectory.c_str());
+		runCommand({"rm", "-rf", tempMidiDirectory});
 		return false;
 	}
 
 	if(!runCommand({"basic-pitch", tempMidiDirectory, tempAudioPath})){
 		cout << "Audio-to-MIDI transcription failed. Ensure basic-pitch is installed and available in PATH." << endl;
 		unlink(tempAudioPath.c_str());
-		rmdir(tempMidiDirectory.c_str());
+		runCommand({"rm", "-rf", tempMidiDirectory});
 		return false;
 	}
 
@@ -356,12 +356,12 @@ bool captureSystemAudioToMidi(const ParamsStruct& params, std::string& generated
 	if(!copyFile(generatedTempMidiPath, outputMidiPath)){
 		cout << "Failed to copy generated MIDI file to output path: " << outputMidiPath << endl;
 		unlink(tempAudioPath.c_str());
-		rmdir(tempMidiDirectory.c_str());
+		runCommand({"rm", "-rf", tempMidiDirectory});
 		return false;
 	}
 
 	unlink(tempAudioPath.c_str());
-	rmdir(tempMidiDirectory.c_str());
+	runCommand({"rm", "-rf", tempMidiDirectory});
 
 	generatedMidiPath = outputMidiPath;
 	return true;
