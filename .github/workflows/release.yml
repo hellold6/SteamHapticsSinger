@@ -123,15 +123,17 @@ jobs:
 
       - name: Build
         shell: msys2 {0}
-        env:
-          PKG_CONFIG_PATH: /clangarm64/lib/pkgconfig
         run: |
-          make steam-haptics-singer.exe \
-            CC=clang \
-            CXX=clang++ \
-            CFLAGS="--target=aarch64-w64-windows-gnu --sysroot=/clangarm64" \
-            CXXFLAGS="--target=aarch64-w64-windows-gnu --sysroot=/clangarm64 -fuse-ld=lld" \
-            LDFLAGS="--target=aarch64-w64-windows-gnu --sysroot=/clangarm64 -fuse-ld=lld"
+          clang --target=aarch64-w64-windows-gnu --sysroot=/clangarm64 \
+            -c -o midifile.o midifile/midifile.c
+          clang++ --target=aarch64-w64-windows-gnu --sysroot=/clangarm64 \
+            -stdlib=libc++ \
+            -I/clangarm64/include/c++/v1 \
+            -I/clangarm64/include \
+            -fuse-ld=lld \
+            -L/clangarm64/lib \
+            -o steam-haptics-singer.exe main.cpp midifile.o \
+            -lusb-1.0 -lhidapi
 
       - name: Bundle DLLs
         shell: msys2 {0}
