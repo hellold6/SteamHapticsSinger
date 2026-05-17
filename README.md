@@ -113,6 +113,9 @@ You will need libusb(-dev), hidapi-hidraw, and pkgconf. If you have them, just t
 
 ## Changelog
 
+[v1.11.2]
+* Steam Controller (2026) is now handled by HIDAPI
+
 [v1.11.1]
 * Steam Controller (2026) now defaults to using rumble for the first two channels
 * Removed -t and -b parameters
