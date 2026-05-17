@@ -1,6 +1,8 @@
 #include <iostream>
 #include <chrono>
 #include <cstring>
+#include <cstdlib>
+#include <string>
 
 #include <stdint-gcc.h>
 #include <unistd.h>
@@ -29,9 +31,12 @@ double midiFrequency[128]  = {0, 8.66196, 9.17702, 9.72272, 10.3009, 10.9134, 11
 
 struct ParamsStruct{
 	const char* midiSong;
+	const char* captureMidiOutput;
 	unsigned int intervalUSec;
+	unsigned int captureDurationSec;
 	int libusbDebugLevel;
 	bool repeatSong;
+	bool captureSystemAudio;
 };
 
 //TEMPORARY, move to ParamsStruct and find a way to reference within playback function
@@ -252,6 +257,64 @@ float timeElapsedSince(std::chrono::steady_clock::time_point tOrigin){
 	return time_span.count();
 }
 
+bool fileExists(const char* path){
+	return access(path, F_OK) == 0;
+}
+
+std::string shellEscape(const std::string& value){
+	std::string escaped = "'";
+	for(char ch : value){
+		if(ch == '\''){
+			escaped += "'\"'\"'";
+		}
+		else{
+			escaped += ch;
+		}
+	}
+	escaped += "'";
+	return escaped;
+}
+
+bool captureSystemAudioToMidi(const ParamsStruct& params, std::string& generatedMidiPath){
+	std::string outputMidiPath = params.captureMidiOutput;
+	std::string tempAudioPath = "/tmp/steam-haptics-singer-capture.wav";
+	std::string tempMidiDirectory = "/tmp/steam-haptics-singer-midi";
+
+	std::string ffmpegCommand = "ffmpeg -hide_banner -loglevel error -y -f pulse -i default -t "
+		+ std::to_string(params.captureDurationSec) + " " + shellEscape(tempAudioPath) + " > /dev/null 2>&1";
+	if(system(ffmpegCommand.c_str()) != 0){
+		cout << "Unable to capture system audio. Make sure ffmpeg is installed and PulseAudio monitor capture is available." << endl;
+		return false;
+	}
+
+	std::string mkdirCommand = "mkdir -p " + shellEscape(tempMidiDirectory);
+	if(system(mkdirCommand.c_str()) != 0){
+		cout << "Unable to create temporary MIDI directory." << endl;
+		return false;
+	}
+
+	std::string basicPitchCommand = "basic-pitch " + shellEscape(tempMidiDirectory) + " " + shellEscape(tempAudioPath) + " > /dev/null 2>&1";
+	if(system(basicPitchCommand.c_str()) != 0){
+		cout << "Unable to transcribe audio to MIDI. Make sure basic-pitch is installed and available in PATH." << endl;
+		return false;
+	}
+
+	std::string generatedTempMidiPath = tempMidiDirectory + "/steam-haptics-singer-capture_basic_pitch.mid";
+	if(!fileExists(generatedTempMidiPath.c_str())){
+		cout << "Transcription completed but no MIDI output file was found." << endl;
+		return false;
+	}
+
+	std::string copyCommand = "cp " + shellEscape(generatedTempMidiPath) + " " + shellEscape(outputMidiPath);
+	if(system(copyCommand.c_str()) != 0){
+		cout << "Unable to copy generated MIDI file to output path: " << outputMidiPath << endl;
+		return false;
+	}
+
+	generatedMidiPath = outputMidiPath;
+	return true;
+}
+
 
 void displayPlayedNotes(int channel, int8_t note){
 	static int8_t notePerChannel[CHANNEL_COUNT] = {NOTE_STOP, NOTE_STOP, NOTE_STOP, NOTE_STOP};
@@ -396,7 +459,7 @@ void playSong(SteamControllerInfos* controller,const ParamsStruct params){
 
 bool parseArguments(int argc, char** argv, ParamsStruct* params){
 	int c;
-	while ( (c = getopt(argc, argv, "d:i:pets")) != -1) {
+	while ( (c = getopt(argc, argv, "d:i:a:o:pets")) != -1) {
 		unsigned long int value;
 		switch(c){
 		/*case 'l':
@@ -423,6 +486,16 @@ bool parseArguments(int argc, char** argv, ParamsStruct* params){
 				params->intervalUSec = value;
 			}
 			break;
+		case 'a':
+			value = strtoul(optarg,NULL,10);
+			if(value > 0){
+				params->captureDurationSec = value;
+				params->captureSystemAudio = true;
+			}
+			break;
+		case 'o':
+			params->captureMidiOutput = optarg;
+			break;
 		case 'p':
 			params->repeatSong = true;
 			break;
@@ -444,6 +517,10 @@ bool parseArguments(int argc, char** argv, ParamsStruct* params){
 		default:
 			break;
 		}
+	}
+	if(params->captureSystemAudio){
+		params->midiSong = params->captureMidiOutput;
+		return true;
 	}
 	if(optind == argc-1 ){
 		params->midiSong = argv[optind];
@@ -476,21 +553,36 @@ int main(int argc, char** argv)
 	params.libusbDebugLevel = LIBUSB_LOG_LEVEL_NONE;
 	params.repeatSong = false;
 	params.midiSong = "\0";
+	params.captureMidiOutput = "captured-audio.mid";
+	params.captureDurationSec = 15;
+	params.captureSystemAudio = false;
 	//params.leftGain = DEFAULT_GAIN;
 	//params.rightGain = DEFAULT_GAIN;
 
 
 	//Parse arguments
 	if(!parseArguments(argc, argv, &params)){
-		cout << "Usage: steam-haptics-singer [-p] [-y] [-d DEBUG_LEVEL] [-i INTERVAL] MIDI_FILE\n"
+		cout << "Usage: steam-haptics-singer [-p] [-d DEBUG_LEVEL] [-i INTERVAL] [-a SECONDS] [-o OUTPUT_MIDI] MIDI_FILE\n"
 			  "\n  -i INTERVAL		Player sleep interval (in microseconds). Lower generally means better song fidelity, but higher cpu usage, and at some point going lower won't improve any more. Default value is 10000"
 			  "\n  -d DEBUG_LEVEL	Libusb debug level. Default is 0, no debug output. max is 4, max verbosity output"
 		      "\n  -p	Repeat song, plays again after ending"
 			  "\n  -e 	Direct velocity to gain control, the MIDI file will set the gain"
 			  "\n  -t	(Steam Controller 2026 Only) Limit to only two channels"
 			  "\n  -s	(Steam Controller 2026 Only) Swap rumble and trackpad channels"
+			  "\n  -a SECONDS	Capture system audio for N seconds and transcribe it to MIDI before playback (Linux/PulseAudio)"
+			  "\n  -o OUTPUT_MIDI	Output path for generated MIDI when using -a. Default: captured-audio.mid"
 				"" << endl;
 		return 1;
+	}
+
+	std::string generatedMidiPath;
+	if(params.captureSystemAudio){
+		cout << "Capturing system audio for " << params.captureDurationSec << " seconds..." << endl;
+		if(!captureSystemAudioToMidi(params, generatedMidiPath)){
+			return 1;
+		}
+		params.midiSong = generatedMidiPath.c_str();
+		cout << "Generated MIDI file: " << params.midiSong << endl;
 	}
 
 

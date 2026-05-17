@@ -81,7 +81,7 @@ Turn on your Steam Controller (2015 or 2026) or Steam Deck
 Songs ready to play can be found in the original guy's [personal collection](https://mega.nz/#F!BWpEWKzB!r7WPw5bZ_domN4pk-FJsjg) (as he called it). Otherwise, you can just try a MIDI and see what happens (most of the time it won't work well).
 
 ### Usage from command prompt:
-	Usage: steam-haptics-singer [-p] [-y] [-d DEBUG_LEVEL] [-i INTERVAL] MIDI_FILE
+	Usage: steam-haptics-singer [-p] [-d DEBUG_LEVEL] [-i INTERVAL] [-a SECONDS] [-o OUTPUT_MIDI] MIDI_FILE
 
 	  -i INTERVAL		Player sleep interval (in microseconds). Lower generally means better song fidelity, but higher cpu usage, and at some point going lower won't improve any more. Default value is 10000
 	  -d DEBUG_LEVEL	Libusb debug level. Default is 0, no debug output. max is 4, max verbosity output
@@ -89,6 +89,19 @@ Songs ready to play can be found in the original guy's [personal collection](htt
 	  -e 	Direct velocity to gain control, the MIDI file will set the gain"
 	  -t	(Steam Controller 2026 Only) Limit to only two channels"
 	  -s	(Steam Controller 2026 Only) Swap rumble and trackpad channels"
+	  -a SECONDS		Capture system audio for N seconds and transcribe it to MIDI before playback (Linux/PulseAudio)
+	  -o OUTPUT_MIDI	Output path for generated MIDI when using -a. Default: captured-audio.mid
+
+### Capture system audio and auto-convert to MIDI
+
+On Linux (PulseAudio), you can capture currently playing computer audio and automatically transcribe it to a MIDI file before playback.
+
+Requirements:
+* `ffmpeg` in PATH (for audio capture)
+* `basic-pitch` in PATH (for audio-to-MIDI transcription)
+
+Example:
+`./steam-haptics-singer -a 20 -o captured-song.mid`
 
 ### MIDI files tips:
 
