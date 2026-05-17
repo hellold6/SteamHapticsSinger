@@ -61,7 +61,8 @@ SteamControllerInfos steamController1;
 bool SteamController_Open(SteamControllerInfos* controller){
 	if(!controller) return false;
 
-	libusb_device_handle* dev_handle;
+	struct hid_device_info *devs, *cur_dev;
+	unsigned char buf[64];
 	//Open Steam Controller device
 	if((controller->dev_handle = libusb_open_device_with_vid_pid(NULL, 0x28DE, 0x1101)) != NULL){ // A Steam Controller
 		cout<<"Found a Steam Controller"<<endl;
@@ -83,8 +84,31 @@ bool SteamController_Open(SteamControllerInfos* controller){
 		controller->type = ControllerType::Triton;
 		if (!tritonLimit) channelCount = 4;
 	}
-	else if((controller->hid_handle = hid_open(0x28DE, 0x1304, NULL)) != NULL) { // Steam Puck
-		cout<<"Found Steam Puck, will attempt to use the first Steam Controller (2026)"<<endl;
+	else if((devs = hid_enumerate(0x28DE, 0x1304)) != NULL) { // Steam Puck
+		cout<<"Found Steam Puck, attempting to find first Steam Controller (2026)... ";
+		
+		cur_dev = devs;
+		while (cur_dev) {
+			if (cur_dev->vendor_id == 0x28DE && cur_dev->product_id == 0x1304) {
+				controller->hid_handle = hid_open_path(cur_dev->path);
+				if(controller->hid_handle) {
+					int res = hid_read_timeout(controller->hid_handle,buf,sizeof(buf),100);
+					if (res > 0) {
+						cout << "OK" << endl;
+						break;
+					}
+				}
+			}
+			cur_dev = cur_dev->next;
+		}
+		
+		hid_free_enumeration(devs);
+		
+		if(!cur_dev) {
+			cout<<endl<<"No controller connected / found"<<endl;
+			return false;
+		}
+		
 		controller->type = ControllerType::Triton;
 		if (!tritonLimit) channelCount = 4;
 	}
@@ -191,9 +215,9 @@ int SteamHaptics_PlayNote(SteamControllerInfos* controller, int channel, int not
 			dataBlob[6] = 0x7F;
 		}
 		
-		r = hid_write(controller->hid_handle,dataBlob,65);
-		if(r != 65) {
-			cout<<"Send Error, expected 65, got "<<r<< endl;
+		r = hid_write(controller->hid_handle,dataBlob,64);
+		if(r < 0) {
+			cout<<"Command Error "<<hid_error(controller->hid_handle)<< endl;
 			exit(0);
 		}
 		break;
