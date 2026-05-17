@@ -46,6 +46,7 @@ struct ParamsStruct{
 	int libusbDebugLevel;
 	bool repeatSong;
 	bool captureSystemAudio;
+	float volume;
 #ifdef _WIN32
 	std::string winAudioDevice;
 #endif
@@ -697,6 +698,7 @@ void playSong(SteamControllerInfos* controller,const ParamsStruct params){
 				SteamHaptics_PlayNote(controller,currentChannel,NOTE_STOP,0);
 				eventNote = MidiFileNoteStartEvent_getNote(selectedEvent);
 				eventVel  = MidiFileNoteStartEvent_getVelocity(selectedEvent);
+				eventVel  = (int8_t)std::min((int)(eventVel * params.volume), 127);
 			}
 
 			//Play notes
@@ -720,9 +722,9 @@ void playSong(SteamControllerInfos* controller,const ParamsStruct params){
 bool parseArguments(int argc, char** argv, ParamsStruct* params){
 	int c;
 #ifndef _WIN32
-	while ( (c = getopt(argc, argv, "d:i:a:o:pets")) != -1) {
+	while ( (c = getopt(argc, argv, "d:i:a:o:petsv:")) != -1) {
 #else
-	while ( (c = getopt(argc, argv, "d:i:a:o:petsw:")) != -1) {
+	while ( (c = getopt(argc, argv, "d:i:a:o:petsw:v:")) != -1) {
 #endif
 		unsigned long int value;
 		switch(c){
@@ -772,6 +774,14 @@ bool parseArguments(int argc, char** argv, ParamsStruct* params){
 		case 's':
 			tritonSwap = true;
 			break;
+		case 'v':
+			{
+				unsigned long int pct = strtoul(optarg, NULL, 10);
+				if(pct > 0 && pct <= 500){
+					params->volume = pct / 100.0f;
+				}
+			}
+			break;
 #ifdef _WIN32
 		case 'w':
 			params->winAudioDevice = optarg;
@@ -815,6 +825,7 @@ int main(int argc, char** argv)
 	params.captureMidiOutput = "captured-audio.mid";
 	params.captureDurationSec = 15;
 	params.captureSystemAudio = false;
+	params.volume = 1.0f;
 #ifdef _WIN32
 	// Most common loopback device name on systems with Realtek audio; override with -w if different.
 	params.winAudioDevice = "Stereo Mix (Realtek High Definition Audio)";
@@ -831,6 +842,7 @@ int main(int argc, char** argv)
 			  "\n  -i INTERVAL     Player sleep interval (in microseconds). Default: 10000"
 			  "\n  -d DEBUG_LEVEL  Libusb debug level (0-4). Default: 0"
 			  "\n  -p              Repeat playback after ending"
+			  "\n  -v PERCENT      Volume multiplier as percentage (1-500). Default: 100"
 			  "\n  -e              Direct velocity to gain control"
 			  "\n  -t              (Steam Controller 2026 Only) Limit to only two channels"
 			  "\n  -s              (Steam Controller 2026 Only) Swap rumble and trackpad channels"
