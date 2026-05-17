@@ -22,7 +22,7 @@ steam-haptics-singer.exe: main.cpp midifile/midifile.c
 
 steam-haptics-singer-arm64.exe: main.cpp midifile/midifile.c
 	clang --target=aarch64-w64-windows-gnu --sysroot=/clangarm64 \
-		-c -o midifile.o midifile/midifile.c
+		-c -o midifile-arm64.o midifile/midifile.c
 	clang++ --target=aarch64-w64-windows-gnu --sysroot=/clangarm64 \
 		-stdlib=libc++ \
 		-I/clangarm64/include/c++/v1 \
@@ -31,9 +31,9 @@ steam-haptics-singer-arm64.exe: main.cpp midifile/midifile.c
 		-I/clangarm64/include/libusb-1.0 \
 		-fuse-ld=lld \
 		-L/clangarm64/lib \
-		-o steam-haptics-singer.exe main.cpp midifile.o \
+		-o steam-haptics-singer.exe main.cpp midifile-arm64.o \
 		-lusb-1.0 -lhidapi
 	cp steam-haptics-singer.exe steam-haptics-singer-arm64.exe
 
 clean:
-	rm -f steam-haptics-singer steam-haptics-singer.exe steam-haptics-singer-arm64.exe midifile.o
+	rm -f steam-haptics-singer steam-haptics-singer.exe steam-haptics-singer-arm64.exe midifile.o midifile-arm64.o
