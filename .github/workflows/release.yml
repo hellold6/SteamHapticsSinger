@@ -101,37 +101,47 @@ jobs:
 
   build-windows-arm64:
     name: Build Windows ARM64 binary
-    runs-on: windows-11-arm
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
-          msystem: CLANGARM64
+          msystem: UCRT64
           update: true
           install: >-
             base-devel
             zip
-            mingw-w64-clang-aarch64-toolchain
+            mingw-w64-ucrt-x86_64-clang
+            mingw-w64-ucrt-x86_64-lld
+            mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-clang-aarch64-libusb
             mingw-w64-clang-aarch64-hidapi
-            mingw-w64-clang-aarch64-pkgconf
 
       - name: Build
         shell: msys2 {0}
-        run: make steam-haptics-singer.exe CC=clang CXX=clang++ PKG_CONFIG=pkgconf
+        env:
+          PKG_CONFIG_PATH: /clangarm64/lib/pkgconfig
+        run: |
+          make steam-haptics-singer.exe \
+            CC=clang \
+            CXX=clang++ \
+            CFLAGS="--target=aarch64-w64-windows-gnu" \
+            CXXFLAGS="--target=aarch64-w64-windows-gnu -fuse-ld=lld" \
+            LDFLAGS="--target=aarch64-w64-windows-gnu -fuse-ld=lld"
 
       - name: Bundle DLLs
         shell: msys2 {0}
         run: |
           mkdir -p windows-arm64
           cp steam-haptics-singer.exe windows-arm64/
-          ldd steam-haptics-singer.exe \
-            | grep -iv 'system32\|windows\|SysWOW' \
-            | awk '{print $3}' \
-            | grep -v '^$' \
-            | xargs -I{} cp {} windows-arm64/ 2>/dev/null || true
+          objdump -p steam-haptics-singer.exe \
+            | grep "DLL Name" \
+            | awk '{print tolower($3)}' \
+            | while read dll; do
+                [ -f "/clangarm64/bin/$dll" ] && cp "/clangarm64/bin/$dll" windows-arm64/
+              done
 
       - name: Zip
         shell: msys2 {0}
