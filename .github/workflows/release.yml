@@ -50,7 +50,7 @@ jobs:
       - name: Build
         shell: msys2 {0}
         run: |
-          g++ -o steam-haptics-singer.exe main.cpp midifile/midifile.c -fpermissive $(pkg-config --libs --cflags libusb-1.0 hidapi)
+          make steam-haptics-singer.exe
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4.3.4
