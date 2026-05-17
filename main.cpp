@@ -542,7 +542,9 @@ bool captureSystemAudioToMidi(const ParamsStruct& params, std::string& generated
 	                "-f", "wasapi",
 	                "-i", wasapiDevice,
 	                "-t", std::to_string(params.captureDurationSec), tempAudioPath})){
-		cout << "Audio capture failed. Ensure ffmpeg is installed.\n"
+		cout << "Audio capture failed. Ensure ffmpeg is installed with WASAPI support.\n"
+		     << "  If ffmpeg reports 'Unknown input format: wasapi', your ffmpeg build lacks WASAPI support.\n"
+		     << "  Download a full-featured Windows build from https://www.gyan.dev/ffmpeg/builds/ (e.g. ffmpeg-release-full.7z).\n"
 		     << "  WASAPI loopback capture requires Windows 7 or later.\n"
 		     << "  To capture from a specific device, use -w \"Device Name\".\n"
 		     << "  Run 'ffmpeg -f wasapi -list_devices true -i dummy' to list available devices." << endl;
