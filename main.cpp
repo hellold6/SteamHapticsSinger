@@ -507,7 +507,7 @@ bool installWindowsFfmpegWithWasapi(){
 	const std::string archiveUrl = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip";
 	const std::string installRoot = getExecutableDirectory() + "\\ffmpeg";
 	const std::string bundledFfmpegPath = getBundledWindowsFfmpegPath();
-	const int installSteps = 3;
+	const int installSteps = 4;
 
 	char tempPath[MAX_PATH];
 	if(GetTempPathA(MAX_PATH, tempPath) == 0){
@@ -525,15 +525,10 @@ bool installWindowsFfmpegWithWasapi(){
 		return false;
 	}
 
-	std::string scriptPath = tempScriptBuf;
-	size_t scriptDot = scriptPath.rfind('.');
-	std::string scriptPs1Path = (scriptDot != std::string::npos) ? scriptPath.substr(0, scriptDot) + ".ps1" : scriptPath + ".ps1";
-	if(MoveFileA(scriptPath.c_str(), scriptPs1Path.c_str())) scriptPath = scriptPs1Path;
-
-	std::string zipPath = tempZipBuf;
-	size_t zipDot = zipPath.rfind('.');
-	std::string zipFilePath = (zipDot != std::string::npos) ? zipPath.substr(0, zipDot) + ".zip" : zipPath + ".zip";
-	if(MoveFileA(zipPath.c_str(), zipFilePath.c_str())) zipPath = zipFilePath;
+	std::string scriptPath = std::string(tempScriptBuf) + ".ps1";
+	std::string zipPath = std::string(tempZipBuf) + ".zip";
+	DeleteFileA(tempScriptBuf);
+	DeleteFileA(tempZipBuf);
 
 	std::string extractDirectory = tempExtractBuf;
 	DeleteFileA(extractDirectory.c_str());
@@ -545,9 +540,8 @@ bool installWindowsFfmpegWithWasapi(){
 	}
 
 	const std::string scriptContent =
-		"param([string]$Url, [string]$ZipPath, [string]$ExtractDir, [string]$InstallRoot)\n"
+		"param([string]$ZipPath, [string]$ExtractDir, [string]$InstallRoot)\n"
 		"$ErrorActionPreference = 'Stop'\n"
-		"Invoke-WebRequest -Uri $Url -OutFile $ZipPath\n"
 		"Expand-Archive -LiteralPath $ZipPath -DestinationPath $ExtractDir -Force\n"
 		"$ffmpeg = Get-ChildItem -LiteralPath $ExtractDir -Filter ffmpeg.exe -Recurse | Select-Object -First 1\n"
 		"if (-not $ffmpeg) { throw 'ffmpeg.exe was not found in the downloaded archive.' }\n"
@@ -567,11 +561,18 @@ bool installWindowsFfmpegWithWasapi(){
 	fclose(scriptFile);
 
 	printInstallProgressBar(1, installSteps, "Preparing WASAPI-capable ffmpeg install");
-	printInstallProgressBar(2, installSteps, "Downloading + extracting ffmpeg (PowerShell shows download progress)");
-	bool installResult = runCommand({"powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath,
-	                                 archiveUrl, zipPath, extractDirectory, installRoot});
+	printInstallProgressBar(2, installSteps, "Downloading ffmpeg archive (PowerShell shows download progress)");
+	bool downloadResult = runCommand({"powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+	                                  "Invoke-WebRequest -Uri $args[0] -OutFile $args[1]",
+	                                  archiveUrl, zipPath});
+	bool installResult = false;
+	if(downloadResult){
+		printInstallProgressBar(3, installSteps, "Extracting and installing ffmpeg.exe");
+		installResult = runCommand({"powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath,
+		                            zipPath, extractDirectory, installRoot});
+	}
 	bool success = installResult && fileExists(bundledFfmpegPath);
-	printInstallProgressBar(3, installSteps, success ? "Install complete" : "Install failed");
+	printInstallProgressBar(4, installSteps, success ? "Install complete" : "Install failed");
 
 	DeleteFileA(scriptPath.c_str());
 	DeleteFileA(zipPath.c_str());
@@ -973,7 +974,7 @@ int main(int argc, char** argv)
 			  "\n  -s              (Steam Controller 2026 Only) Swap rumble and trackpad channels"
 #ifdef _WIN32
 			  "\n  -w DEVICE_NAME  (Windows) WASAPI render device name for audio capture. Default: system default output"
-			  "\n                   If WASAPI is missing in ffmpeg, this app auto-installs a local ffmpeg build with progress output."
+			  "\n                   If WASAPI is missing in ffmpeg, this app automatically installs a local ffmpeg build and displays installation progress."
 			  "\n                   Run 'ffmpeg -f wasapi -list_devices true -i dummy' to list available devices."
 #endif
 			  "" << endl;
