@@ -1,2 +1,4 @@
 steam-haptics-singer 
+steam-haptics-singer.exe
+*.o
 *.mid
