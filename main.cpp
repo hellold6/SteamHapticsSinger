@@ -5,16 +5,17 @@
 #include <string>
 #include <vector>
 
-#include <stdint-gcc.h>
 #include <unistd.h>
 #include <stdint.h>
 
 #include <signal.h>
 #include <stdio.h>
+#ifndef _WIN32
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#endif
 
 #include <hidapi.h>
 #include <libusb.h>
@@ -268,27 +269,6 @@ void setMidiSong(ParamsStruct* params, const std::string& midiPath){
 	params->midiSong = params->midiSongStorage.c_str();
 }
 
-bool runCommand(const std::vector<std::string>& commandArgs){
-	if(commandArgs.empty()) return false;
-
-	std::vector<char*> argv;
-	for(const std::string& arg : commandArgs){
-		argv.push_back(const_cast<char*>(arg.c_str()));
-	}
-	argv.push_back(nullptr);
-
-	pid_t pid = fork();
-	if(pid < 0) return false;
-	if(pid == 0){
-		execvp(argv[0], argv.data());
-		_exit(127);
-	}
-
-	int status = 0;
-	if(waitpid(pid, &status, 0) < 0) return false;
-	return WIFEXITED(status) && (WEXITSTATUS(status) == 0);
-}
-
 bool copyFile(const std::string& source, const std::string& destination){
 	FILE* sourceFile = fopen(source.c_str(), "rb");
 	if(!sourceFile) return false;
@@ -311,6 +291,28 @@ bool copyFile(const std::string& source, const std::string& destination){
 	fclose(sourceFile);
 	fclose(destinationFile);
 	return true;
+}
+
+#ifndef _WIN32
+bool runCommand(const std::vector<std::string>& commandArgs){
+	if(commandArgs.empty()) return false;
+
+	std::vector<char*> argv;
+	for(const std::string& arg : commandArgs){
+		argv.push_back(const_cast<char*>(arg.c_str()));
+	}
+	argv.push_back(nullptr);
+
+	pid_t pid = fork();
+	if(pid < 0) return false;
+	if(pid == 0){
+		execvp(argv[0], argv.data());
+		_exit(127);
+	}
+
+	int status = 0;
+	if(waitpid(pid, &status, 0) < 0) return false;
+	return WIFEXITED(status) && (WEXITSTATUS(status) == 0);
 }
 
 bool removeDirectoryRecursively(const std::string& directoryPath){
@@ -396,6 +398,7 @@ bool captureSystemAudioToMidi(const ParamsStruct& params, std::string& generated
 	generatedMidiPath = outputMidiPath;
 	return true;
 }
+#endif // !_WIN32
 
 
 void displayPlayedNotes(int channel, int8_t note){
@@ -435,7 +438,7 @@ void playSong(SteamControllerInfos* controller,const ParamsStruct params){
 	MidiFile_t midifile;
 
 	//Open Midi File
-	midifile = MidiFile_load(params.midiSong);
+	midifile = MidiFile_load(const_cast<char*>(params.midiSong));
 
 	if(midifile == NULL){
 		cout << "Unable to open MIDI file!" << params.midiSong << endl;
@@ -569,11 +572,16 @@ bool parseArguments(int argc, char** argv, ParamsStruct* params){
 			}
 			break;
 		case 'a':
+#ifndef _WIN32
 			value = strtoul(optarg,NULL,10);
 			if(value > 0){
 				params->captureDurationSec = value;
 				params->captureSystemAudio = true;
 			}
+#else
+			cout << "System audio capture (-a) is not supported on Windows." << endl;
+			return false;
+#endif
 			break;
 		case 'o':
 			params->captureMidiOutput = optarg;
@@ -657,6 +665,7 @@ int main(int argc, char** argv)
 	}
 
 	std::string generatedMidiPath;
+#ifndef _WIN32
 	if(params.captureSystemAudio){
 		cout << "Capturing system audio for " << params.captureDurationSec << " seconds..." << endl;
 		if(!captureSystemAudioToMidi(params, generatedMidiPath)){
@@ -665,6 +674,7 @@ int main(int argc, char** argv)
 		setMidiSong(&params, generatedMidiPath);
 		cout << "Generated MIDI file: " << params.midiSong << endl;
 	}
+#endif
 
 
 	//Initializing LIBUSB
