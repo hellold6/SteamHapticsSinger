@@ -68,6 +68,7 @@ jobs:
           update: true
           install: >-
             base-devel
+            zip
             mingw-w64-ucrt-x86_64-toolchain
             mingw-w64-ucrt-x86_64-libusb
             mingw-w64-ucrt-x86_64-hidapi
@@ -111,6 +112,7 @@ jobs:
           update: true
           install: >-
             base-devel
+            zip
             mingw-w64-clang-aarch64-toolchain
             mingw-w64-clang-aarch64-libusb
             mingw-w64-clang-aarch64-hidapi
