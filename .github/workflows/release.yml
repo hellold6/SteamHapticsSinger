@@ -118,6 +118,7 @@ jobs:
             mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-clang-aarch64-headers
             mingw-w64-clang-aarch64-crt
+            mingw-w64-clang-aarch64-winpthreads
             mingw-w64-clang-aarch64-libusb
             mingw-w64-clang-aarch64-hidapi
 
