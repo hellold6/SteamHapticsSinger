@@ -1,6 +1,9 @@
 #include <iostream>
 #include <chrono>
 #include <cstring>
+#include <cstdlib>
+#include <string>
+#include <vector>
 
 #include <stdint-gcc.h>
 #include <unistd.h>
@@ -8,6 +11,10 @@
 
 #include <signal.h>
 #include <stdio.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 
 #include <hidapi.h>
 #include <libusb.h>
@@ -29,9 +36,13 @@ double midiFrequency[128]  = {0, 8.66196, 9.17702, 9.72272, 10.3009, 10.9134, 11
 
 struct ParamsStruct{
 	const char* midiSong;
+	const char* captureMidiOutput;
+	std::string midiSongStorage;
 	unsigned int intervalUSec;
+	unsigned int captureDurationSec;
 	int libusbDebugLevel;
 	bool repeatSong;
+	bool captureSystemAudio;
 };
 
 //TEMPORARY, move to ParamsStruct and find a way to reference within playback function
@@ -252,6 +263,140 @@ float timeElapsedSince(std::chrono::steady_clock::time_point tOrigin){
 	return time_span.count();
 }
 
+void setMidiSong(ParamsStruct* params, const std::string& midiPath){
+	params->midiSongStorage = midiPath;
+	params->midiSong = params->midiSongStorage.c_str();
+}
+
+bool runCommand(const std::vector<std::string>& commandArgs){
+	if(commandArgs.empty()) return false;
+
+	std::vector<char*> argv;
+	for(const std::string& arg : commandArgs){
+		argv.push_back(const_cast<char*>(arg.c_str()));
+	}
+	argv.push_back(nullptr);
+
+	pid_t pid = fork();
+	if(pid < 0) return false;
+	if(pid == 0){
+		execvp(argv[0], argv.data());
+		_exit(127);
+	}
+
+	int status = 0;
+	if(waitpid(pid, &status, 0) < 0) return false;
+	return WIFEXITED(status) && (WEXITSTATUS(status) == 0);
+}
+
+bool copyFile(const std::string& source, const std::string& destination){
+	FILE* sourceFile = fopen(source.c_str(), "rb");
+	if(!sourceFile) return false;
+	FILE* destinationFile = fopen(destination.c_str(), "wb");
+	if(!destinationFile){
+		fclose(sourceFile);
+		return false;
+	}
+
+	unsigned char buffer[8192];
+	size_t bytesRead;
+	while((bytesRead = fread(buffer, 1, sizeof(buffer), sourceFile)) > 0){
+		if(fwrite(buffer, 1, bytesRead, destinationFile) != bytesRead){
+			fclose(sourceFile);
+			fclose(destinationFile);
+			return false;
+		}
+	}
+
+	fclose(sourceFile);
+	fclose(destinationFile);
+	return true;
+}
+
+bool removeDirectoryRecursively(const std::string& directoryPath){
+	DIR* directory = opendir(directoryPath.c_str());
+	if(!directory) return false;
+
+	bool isSuccess = true;
+	struct dirent* entry = nullptr;
+	while((entry = readdir(directory)) != nullptr){
+		if((strcmp(entry->d_name, ".") == 0) || (strcmp(entry->d_name, "..") == 0)) continue;
+
+		std::string childPath = directoryPath + "/" + entry->d_name;
+		struct stat childStat = {0};
+		if(lstat(childPath.c_str(), &childStat) != 0){
+			isSuccess = false;
+			continue;
+		}
+
+		if(S_ISDIR(childStat.st_mode)){
+			if(!removeDirectoryRecursively(childPath)) isSuccess = false;
+		}
+		else{
+			if(unlink(childPath.c_str()) != 0) isSuccess = false;
+		}
+	}
+
+	closedir(directory);
+	if(rmdir(directoryPath.c_str()) != 0) isSuccess = false;
+	return isSuccess;
+}
+
+bool captureSystemAudioToMidi(const ParamsStruct& params, std::string& generatedMidiPath){
+	std::string outputMidiPath = params.captureMidiOutput;
+
+	char tempAudioTemplate[] = "/tmp/steam-haptics-singer-audio-XXXXXX.wav";
+	int tempAudioFd = mkstemps(tempAudioTemplate, 4);
+	if(tempAudioFd < 0){
+		cout << "Unable to create temporary audio file." << endl;
+		return false;
+	}
+	close(tempAudioFd);
+	std::string tempAudioPath = tempAudioTemplate;
+
+	char tempMidiDirTemplate[] = "/tmp/steam-haptics-singer-midi-XXXXXX";
+	char* tempMidiDir = mkdtemp(tempMidiDirTemplate);
+	if(tempMidiDir == nullptr){
+		cout << "Unable to create temporary MIDI directory." << endl;
+		unlink(tempAudioPath.c_str());
+		return false;
+	}
+	std::string tempMidiDirectory = tempMidiDir;
+
+	if(!runCommand({"ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "pulse", "-i", "default", "-t", std::to_string(params.captureDurationSec), tempAudioPath})){
+		cout << "Audio capture failed. Ensure ffmpeg is installed and system audio capture is accessible." << endl;
+		unlink(tempAudioPath.c_str());
+		removeDirectoryRecursively(tempMidiDirectory);
+		return false;
+	}
+
+	if(!runCommand({"basic-pitch", tempMidiDirectory, tempAudioPath})){
+		cout << "Audio-to-MIDI transcription failed. Ensure basic-pitch is installed and available in PATH." << endl;
+		unlink(tempAudioPath.c_str());
+		removeDirectoryRecursively(tempMidiDirectory);
+		return false;
+	}
+
+	size_t slashIndex = tempAudioPath.find_last_of('/');
+	std::string tempAudioName = (slashIndex == std::string::npos) ? tempAudioPath : tempAudioPath.substr(slashIndex + 1);
+	size_t extensionIndex = tempAudioName.find_last_of('.');
+	std::string tempAudioBaseName = (extensionIndex == std::string::npos) ? tempAudioName : tempAudioName.substr(0, extensionIndex);
+	std::string generatedTempMidiPath = tempMidiDirectory + "/" + tempAudioBaseName + "_basic_pitch.mid";
+
+	if(!copyFile(generatedTempMidiPath, outputMidiPath)){
+		cout << "Failed to copy generated MIDI file to output path: " << outputMidiPath << endl;
+		unlink(tempAudioPath.c_str());
+		removeDirectoryRecursively(tempMidiDirectory);
+		return false;
+	}
+
+	unlink(tempAudioPath.c_str());
+	removeDirectoryRecursively(tempMidiDirectory);
+
+	generatedMidiPath = outputMidiPath;
+	return true;
+}
+
 
 void displayPlayedNotes(int channel, int8_t note){
 	static int8_t notePerChannel[CHANNEL_COUNT] = {NOTE_STOP, NOTE_STOP, NOTE_STOP, NOTE_STOP};
@@ -396,7 +541,7 @@ void playSong(SteamControllerInfos* controller,const ParamsStruct params){
 
 bool parseArguments(int argc, char** argv, ParamsStruct* params){
 	int c;
-	while ( (c = getopt(argc, argv, "d:i:pets")) != -1) {
+	while ( (c = getopt(argc, argv, "d:i:a:o:pets")) != -1) {
 		unsigned long int value;
 		switch(c){
 		/*case 'l':
@@ -423,6 +568,16 @@ bool parseArguments(int argc, char** argv, ParamsStruct* params){
 				params->intervalUSec = value;
 			}
 			break;
+		case 'a':
+			value = strtoul(optarg,NULL,10);
+			if(value > 0){
+				params->captureDurationSec = value;
+				params->captureSystemAudio = true;
+			}
+			break;
+		case 'o':
+			params->captureMidiOutput = optarg;
+			break;
 		case 'p':
 			params->repeatSong = true;
 			break;
@@ -445,8 +600,11 @@ bool parseArguments(int argc, char** argv, ParamsStruct* params){
 			break;
 		}
 	}
+	if(params->captureSystemAudio){
+		return true;
+	}
 	if(optind == argc-1 ){
-		params->midiSong = argv[optind];
+		setMidiSong(params, argv[optind]);
 		return true;
 	}
 	else{
@@ -476,21 +634,36 @@ int main(int argc, char** argv)
 	params.libusbDebugLevel = LIBUSB_LOG_LEVEL_NONE;
 	params.repeatSong = false;
 	params.midiSong = "\0";
+	params.captureMidiOutput = "captured-audio.mid";
+	params.captureDurationSec = 15;
+	params.captureSystemAudio = false;
 	//params.leftGain = DEFAULT_GAIN;
 	//params.rightGain = DEFAULT_GAIN;
 
 
 	//Parse arguments
 	if(!parseArguments(argc, argv, &params)){
-		cout << "Usage: steam-haptics-singer [-p] [-y] [-d DEBUG_LEVEL] [-i INTERVAL] MIDI_FILE\n"
+		cout << "Usage: steam-haptics-singer [-p] [-d DEBUG_LEVEL] [-i INTERVAL] [-a SECONDS] [-o OUTPUT_MIDI] MIDI_FILE\n"
 			  "\n  -i INTERVAL		Player sleep interval (in microseconds). Lower generally means better song fidelity, but higher cpu usage, and at some point going lower won't improve any more. Default value is 10000"
 			  "\n  -d DEBUG_LEVEL	Libusb debug level. Default is 0, no debug output. max is 4, max verbosity output"
 		      "\n  -p	Repeat song, plays again after ending"
 			  "\n  -e 	Direct velocity to gain control, the MIDI file will set the gain"
 			  "\n  -t	(Steam Controller 2026 Only) Limit to only two channels"
 			  "\n  -s	(Steam Controller 2026 Only) Swap rumble and trackpad channels"
+			  "\n  -a SECONDS	Capture system audio for N seconds and transcribe it to MIDI before playback (Linux/PulseAudio)"
+			  "\n  -o OUTPUT_MIDI	Output path for generated MIDI when using -a. Default: captured-audio.mid"
 				"" << endl;
 		return 1;
+	}
+
+	std::string generatedMidiPath;
+	if(params.captureSystemAudio){
+		cout << "Capturing system audio for " << params.captureDurationSec << " seconds..." << endl;
+		if(!captureSystemAudioToMidi(params, generatedMidiPath)){
+			return 1;
+		}
+		setMidiSong(&params, generatedMidiPath);
+		cout << "Generated MIDI file: " << params.midiSong << endl;
 	}
 
 
