@@ -32,6 +32,7 @@ double midiFrequency[128]  = {0, 8.66196, 9.17702, 9.72272, 10.3009, 10.9134, 11
 struct ParamsStruct{
 	const char* midiSong;
 	const char* captureMidiOutput;
+	std::string midiSongStorage;
 	unsigned int intervalUSec;
 	unsigned int captureDurationSec;
 	int libusbDebugLevel;
@@ -257,10 +258,6 @@ float timeElapsedSince(std::chrono::steady_clock::time_point tOrigin){
 	return time_span.count();
 }
 
-bool fileExists(const char* path){
-	return access(path, F_OK) == 0;
-}
-
 std::string shellEscape(const std::string& value){
 	std::string escaped = "'";
 	for(char ch : value){
@@ -281,7 +278,7 @@ bool captureSystemAudioToMidi(const ParamsStruct& params, std::string& generated
 	std::string tempMidiDirectory = "/tmp/steam-haptics-singer-midi";
 
 	std::string ffmpegCommand = "ffmpeg -hide_banner -loglevel error -y -f pulse -i default -t "
-		+ std::to_string(params.captureDurationSec) + " " + shellEscape(tempAudioPath) + " > /dev/null 2>&1";
+		+ std::to_string(params.captureDurationSec) + " " + shellEscape(tempAudioPath);
 	if(system(ffmpegCommand.c_str()) != 0){
 		cout << "Unable to capture system audio. Make sure ffmpeg is installed and PulseAudio monitor capture is available." << endl;
 		return false;
@@ -293,21 +290,16 @@ bool captureSystemAudioToMidi(const ParamsStruct& params, std::string& generated
 		return false;
 	}
 
-	std::string basicPitchCommand = "basic-pitch " + shellEscape(tempMidiDirectory) + " " + shellEscape(tempAudioPath) + " > /dev/null 2>&1";
+	std::string basicPitchCommand = "basic-pitch " + shellEscape(tempMidiDirectory) + " " + shellEscape(tempAudioPath);
 	if(system(basicPitchCommand.c_str()) != 0){
 		cout << "Unable to transcribe audio to MIDI. Make sure basic-pitch is installed and available in PATH." << endl;
 		return false;
 	}
 
 	std::string generatedTempMidiPath = tempMidiDirectory + "/steam-haptics-singer-capture_basic_pitch.mid";
-	if(!fileExists(generatedTempMidiPath.c_str())){
-		cout << "Transcription completed but no MIDI output file was found." << endl;
-		return false;
-	}
-
 	std::string copyCommand = "cp " + shellEscape(generatedTempMidiPath) + " " + shellEscape(outputMidiPath);
 	if(system(copyCommand.c_str()) != 0){
-		cout << "Unable to copy generated MIDI file to output path: " << outputMidiPath << endl;
+		cout << "Unable to copy generated MIDI file to output path (transcriber output may be missing): " << outputMidiPath << endl;
 		return false;
 	}
 
@@ -519,11 +511,13 @@ bool parseArguments(int argc, char** argv, ParamsStruct* params){
 		}
 	}
 	if(params->captureSystemAudio){
-		params->midiSong = params->captureMidiOutput;
+		params->midiSongStorage = params->captureMidiOutput;
+		params->midiSong = params->midiSongStorage.c_str();
 		return true;
 	}
 	if(optind == argc-1 ){
-		params->midiSong = argv[optind];
+		params->midiSongStorage = argv[optind];
+		params->midiSong = params->midiSongStorage.c_str();
 		return true;
 	}
 	else{
@@ -581,7 +575,8 @@ int main(int argc, char** argv)
 		if(!captureSystemAudioToMidi(params, generatedMidiPath)){
 			return 1;
 		}
-		params.midiSong = generatedMidiPath.c_str();
+		params.midiSongStorage = generatedMidiPath;
+		params.midiSong = params.midiSongStorage.c_str();
 		cout << "Generated MIDI file: " << params.midiSong << endl;
 	}
 
