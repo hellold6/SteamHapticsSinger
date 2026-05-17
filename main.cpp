@@ -46,6 +46,9 @@ struct ParamsStruct{
 	int libusbDebugLevel;
 	bool repeatSong;
 	bool captureSystemAudio;
+#ifdef _WIN32
+	std::string winAudioDevice;
+#endif
 };
 
 //TEMPORARY, move to ParamsStruct and find a way to reference within playback function
@@ -403,16 +406,46 @@ bool captureSystemAudioToMidi(const ParamsStruct& params, std::string& generated
 #endif // !_WIN32
 
 #ifdef _WIN32
+// Escape a single argument for the Windows command-line (CommandLineToArgvW-compatible).
+static std::string windowsQuoteArg(const std::string& arg){
+	// No quoting needed if the argument has no problematic characters
+	if(!arg.empty() && arg.find_first_of(" \t\n\v\"") == std::string::npos){
+		return arg;
+	}
+	std::string result = "\"";
+	for(auto it = arg.begin(); ; ++it){
+		int backslashCount = 0;
+		while(it != arg.end() && *it == '\\'){
+			++it;
+			++backslashCount;
+		}
+		if(it == arg.end()){
+			// Backslashes at the end: double them before the closing quote
+			result.append(backslashCount * 2, '\\');
+			break;
+		}
+		else if(*it == '"'){
+			// Backslashes before a quote: double them, then escape the quote
+			result.append(backslashCount * 2 + 1, '\\');
+			result.push_back('"');
+		}
+		else{
+			// Ordinary character: backslashes are not special
+			result.append(backslashCount, '\\');
+			result.push_back(*it);
+		}
+	}
+	result.push_back('"');
+	return result;
+}
+
 bool runCommand(const std::vector<std::string>& commandArgs){
 	if(commandArgs.empty()) return false;
 
 	std::string commandLine;
 	for(size_t i = 0; i < commandArgs.size(); i++){
 		if(i > 0) commandLine += " ";
-		bool needsQuotes = commandArgs[i].find_first_of(" \t") != std::string::npos;
-		if(needsQuotes) commandLine += "\"";
-		commandLine += commandArgs[i];
-		if(needsQuotes) commandLine += "\"";
+		commandLine += windowsQuoteArg(commandArgs[i]);
 	}
 
 	STARTUPINFOA si;
@@ -425,6 +458,7 @@ bool runCommand(const std::vector<std::string>& commandArgs){
 	cmdBuf.push_back('\0');
 
 	if(!CreateProcessA(NULL, cmdBuf.data(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)){
+		cout << "Failed to start process (error " << GetLastError() << "): " << commandArgs[0] << endl;
 		return false;
 	}
 
@@ -473,7 +507,7 @@ bool captureSystemAudioToMidi(const ParamsStruct& params, std::string& generated
 
 	// Create a uniquely named temp audio file with .wav extension
 	char tempAudioBuf[MAX_PATH];
-	if(GetTempFileNameA(tempPath, "sha", 0, tempAudioBuf) == 0){
+	if(GetTempFileNameA(tempPath, "aud", 0, tempAudioBuf) == 0){
 		cout << "Unable to create temporary audio file." << endl;
 		return false;
 	}
@@ -484,7 +518,7 @@ bool captureSystemAudioToMidi(const ParamsStruct& params, std::string& generated
 
 	// Create a uniquely named temp MIDI directory
 	char tempMidiDirBuf[MAX_PATH];
-	if(GetTempFileNameA(tempPath, "shm", 0, tempMidiDirBuf) == 0){
+	if(GetTempFileNameA(tempPath, "mid", 0, tempMidiDirBuf) == 0){
 		cout << "Unable to create temporary MIDI directory." << endl;
 		return false;
 	}
@@ -495,8 +529,11 @@ bool captureSystemAudioToMidi(const ParamsStruct& params, std::string& generated
 		return false;
 	}
 
-	if(!runCommand({"ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "dshow", "-i", "audio=Stereo Mix (Realtek High Definition Audio)", "-t", std::to_string(params.captureDurationSec), tempAudioPath})){
-		cout << "Audio capture failed. Ensure ffmpeg is installed and a loopback audio device (e.g. \"Stereo Mix\") is enabled in Windows Sound settings." << endl;
+	std::string audioDevice = "audio=" + params.winAudioDevice;
+	if(!runCommand({"ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "dshow", "-i", audioDevice, "-t", std::to_string(params.captureDurationSec), tempAudioPath})){
+		cout << "Audio capture failed. Ensure ffmpeg is installed and the loopback audio device \"" << params.winAudioDevice << "\" is enabled in Windows Sound settings.\n"
+		     << "  Use 'ffmpeg -f dshow -list_devices true -i dummy' to list available devices,\n"
+		     << "  then pass the correct device name with -w \"Device Name\"." << endl;
 		DeleteFileA(tempAudioPath.c_str());
 		removeDirectoryRecursively(tempMidiDirectory);
 		return false;
@@ -674,7 +711,11 @@ void playSong(SteamControllerInfos* controller,const ParamsStruct params){
 
 bool parseArguments(int argc, char** argv, ParamsStruct* params){
 	int c;
+#ifndef _WIN32
 	while ( (c = getopt(argc, argv, "d:i:a:o:pets")) != -1) {
+#else
+	while ( (c = getopt(argc, argv, "d:i:a:o:petsw:")) != -1) {
+#endif
 		unsigned long int value;
 		switch(c){
 		/*case 'l':
@@ -723,6 +764,11 @@ bool parseArguments(int argc, char** argv, ParamsStruct* params){
 		case 's':
 			tritonSwap = true;
 			break;
+#ifdef _WIN32
+		case 'w':
+			params->winAudioDevice = optarg;
+			break;
+#endif
 		// case 'y':
 		// 	legacyInst = true;
 		// 	break;
@@ -770,6 +816,9 @@ int main(int argc, char** argv)
 	params.captureMidiOutput = "captured-audio.mid";
 	params.captureDurationSec = 15;
 	params.captureSystemAudio = false;
+#ifdef _WIN32
+	params.winAudioDevice = "Stereo Mix (Realtek High Definition Audio)";
+#endif
 	//params.leftGain = DEFAULT_GAIN;
 	//params.rightGain = DEFAULT_GAIN;
 
@@ -785,6 +834,10 @@ int main(int argc, char** argv)
 			  "\n  -s	(Steam Controller 2026 Only) Swap rumble and trackpad channels"
 			  "\n  -a SECONDS	Capture system audio for N seconds and transcribe it to MIDI before playback (Linux: PulseAudio; Windows: DirectShow/Stereo Mix)"
 			  "\n  -o OUTPUT_MIDI	Output path for generated MIDI when using -a. Default: captured-audio.mid"
+#ifdef _WIN32
+			  "\n  -w DEVICE_NAME	(Windows) DirectShow audio device name for system audio capture. Default: \"Stereo Mix (Realtek High Definition Audio)\""
+			  "\n                   Run 'ffmpeg -f dshow -list_devices true -i dummy' to list available devices."
+#endif
 				"" << endl;
 		return 1;
 	}
