@@ -11,6 +11,7 @@
 
 #include <signal.h>
 #include <stdio.h>
+#include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -298,7 +299,7 @@ bool copyFile(const std::string& source, const std::string& destination){
 	}
 
 	unsigned char buffer[8192];
-	size_t bytesRead = 0;
+	size_t bytesRead;
 	while((bytesRead = fread(buffer, 1, sizeof(buffer), sourceFile)) > 0){
 		if(fwrite(buffer, 1, bytesRead, destinationFile) != bytesRead){
 			fclose(sourceFile);
@@ -310,6 +311,35 @@ bool copyFile(const std::string& source, const std::string& destination){
 	fclose(sourceFile);
 	fclose(destinationFile);
 	return true;
+}
+
+bool removeDirectoryRecursively(const std::string& directoryPath){
+	DIR* directory = opendir(directoryPath.c_str());
+	if(!directory) return false;
+
+	bool isSuccess = true;
+	struct dirent* entry = nullptr;
+	while((entry = readdir(directory)) != nullptr){
+		if((strcmp(entry->d_name, ".") == 0) || (strcmp(entry->d_name, "..") == 0)) continue;
+
+		std::string childPath = directoryPath + "/" + entry->d_name;
+		struct stat childStat = {0};
+		if(lstat(childPath.c_str(), &childStat) != 0){
+			isSuccess = false;
+			continue;
+		}
+
+		if(S_ISDIR(childStat.st_mode)){
+			if(!removeDirectoryRecursively(childPath)) isSuccess = false;
+		}
+		else{
+			if(unlink(childPath.c_str()) != 0) isSuccess = false;
+		}
+	}
+
+	closedir(directory);
+	if(rmdir(directoryPath.c_str()) != 0) isSuccess = false;
+	return isSuccess;
 }
 
 bool captureSystemAudioToMidi(const ParamsStruct& params, std::string& generatedMidiPath){
@@ -326,7 +356,7 @@ bool captureSystemAudioToMidi(const ParamsStruct& params, std::string& generated
 
 	char tempMidiDirTemplate[] = "/tmp/steam-haptics-singer-midi-XXXXXX";
 	char* tempMidiDir = mkdtemp(tempMidiDirTemplate);
-	if(tempMidiDir == NULL){
+	if(tempMidiDir == nullptr){
 		cout << "Unable to create temporary MIDI directory." << endl;
 		unlink(tempAudioPath.c_str());
 		return false;
@@ -336,14 +366,14 @@ bool captureSystemAudioToMidi(const ParamsStruct& params, std::string& generated
 	if(!runCommand({"ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "pulse", "-i", "default", "-t", std::to_string(params.captureDurationSec), tempAudioPath})){
 		cout << "Audio capture failed. Ensure ffmpeg is installed and system audio capture is accessible." << endl;
 		unlink(tempAudioPath.c_str());
-		runCommand({"rm", "-rf", tempMidiDirectory});
+		removeDirectoryRecursively(tempMidiDirectory);
 		return false;
 	}
 
 	if(!runCommand({"basic-pitch", tempMidiDirectory, tempAudioPath})){
 		cout << "Audio-to-MIDI transcription failed. Ensure basic-pitch is installed and available in PATH." << endl;
 		unlink(tempAudioPath.c_str());
-		runCommand({"rm", "-rf", tempMidiDirectory});
+		removeDirectoryRecursively(tempMidiDirectory);
 		return false;
 	}
 
@@ -356,12 +386,12 @@ bool captureSystemAudioToMidi(const ParamsStruct& params, std::string& generated
 	if(!copyFile(generatedTempMidiPath, outputMidiPath)){
 		cout << "Failed to copy generated MIDI file to output path: " << outputMidiPath << endl;
 		unlink(tempAudioPath.c_str());
-		runCommand({"rm", "-rf", tempMidiDirectory});
+		removeDirectoryRecursively(tempMidiDirectory);
 		return false;
 	}
 
 	unlink(tempAudioPath.c_str());
-	runCommand({"rm", "-rf", tempMidiDirectory});
+	removeDirectoryRecursively(tempMidiDirectory);
 
 	generatedMidiPath = outputMidiPath;
 	return true;
