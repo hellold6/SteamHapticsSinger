@@ -20,9 +20,11 @@ steam-haptics-singer.exe: main.cpp midifile/midifile.c
 	$(CC) $(CFLAGS) -c -o midifile.o midifile/midifile.c
 	$(CXX) $(CXXFLAGS) -o steam-haptics-singer.exe main.cpp midifile.o $(LDFLAGS) `$(PKG_CONFIG) --libs --cflags $(WINDOWS_PACKAGES)`
 
-steam-haptics-singer-arm64.exe: main.cpp midifile/midifile.c
+midifile-arm64.o: midifile/midifile.c
 	clang --target=aarch64-w64-windows-gnu --sysroot=/clangarm64 \
 		-c -o midifile-arm64.o midifile/midifile.c
+
+steam-haptics-singer-arm64.exe: main.cpp midifile-arm64.o
 	clang++ --target=aarch64-w64-windows-gnu --sysroot=/clangarm64 \
 		-stdlib=libc++ \
 		-I/clangarm64/include/c++/v1 \
