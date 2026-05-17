@@ -505,33 +505,41 @@ bool captureSystemAudioToMidi(const ParamsStruct& params, std::string& generated
 		return false;
 	}
 
-	// Create a uniquely named temp audio file with .wav extension
+	// Create a uniquely named temp audio file with .wav extension.
+	// GetTempFileNameA atomically creates and holds a .TMP file; rename it to .wav to avoid
+	// a delete-then-create race while still keeping a guaranteed-unique name.
 	char tempAudioBuf[MAX_PATH];
 	if(GetTempFileNameA(tempPath, "aud", 0, tempAudioBuf) == 0){
 		cout << "Unable to create temporary audio file." << endl;
 		return false;
 	}
-	DeleteFileA(tempAudioBuf); // GetTempFileNameA creates a .TMP file; remove it so ffmpeg can write .wav
 	std::string tempAudioPath = std::string(tempAudioBuf);
 	size_t dotPos = tempAudioPath.rfind('.');
-	if(dotPos != std::string::npos) tempAudioPath = tempAudioPath.substr(0, dotPos) + ".wav";
+	std::string tempAudioWavPath = (dotPos != std::string::npos) ? tempAudioPath.substr(0, dotPos) + ".wav" : tempAudioPath + ".wav";
+	if(MoveFileA(tempAudioBuf, tempAudioWavPath.c_str())){
+		tempAudioPath = tempAudioWavPath;
+	}
+	// If rename fails the .TMP path is still used; ffmpeg writes WAV regardless of extension.
 
 	// Create a uniquely named temp MIDI directory
 	char tempMidiDirBuf[MAX_PATH];
 	if(GetTempFileNameA(tempPath, "mid", 0, tempMidiDirBuf) == 0){
 		cout << "Unable to create temporary MIDI directory." << endl;
+		DeleteFileA(tempAudioPath.c_str());
 		return false;
 	}
 	DeleteFileA(tempMidiDirBuf);
 	std::string tempMidiDirectory = tempMidiDirBuf;
 	if(!CreateDirectoryA(tempMidiDirectory.c_str(), NULL)){
 		cout << "Unable to create temporary MIDI directory." << endl;
+		DeleteFileA(tempAudioPath.c_str());
 		return false;
 	}
 
 	std::string audioDevice = "audio=" + params.winAudioDevice;
 	if(!runCommand({"ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "dshow", "-i", audioDevice, "-t", std::to_string(params.captureDurationSec), tempAudioPath})){
 		cout << "Audio capture failed. Ensure ffmpeg is installed and the loopback audio device \"" << params.winAudioDevice << "\" is enabled in Windows Sound settings.\n"
+		     << "  Common device names: \"Stereo Mix\", \"What U Hear\", \"Wave Out Mix\" (varies by driver).\n"
 		     << "  Use 'ffmpeg -f dshow -list_devices true -i dummy' to list available devices,\n"
 		     << "  then pass the correct device name with -w \"Device Name\"." << endl;
 		DeleteFileA(tempAudioPath.c_str());
@@ -817,6 +825,7 @@ int main(int argc, char** argv)
 	params.captureDurationSec = 15;
 	params.captureSystemAudio = false;
 #ifdef _WIN32
+	// Most common loopback device name on systems with Realtek audio; override with -w if different.
 	params.winAudioDevice = "Stereo Mix (Realtek High Definition Audio)";
 #endif
 	//params.leftGain = DEFAULT_GAIN;
