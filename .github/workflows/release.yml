@@ -99,67 +99,6 @@ jobs:
           name: steam-haptics-singer-windows-x64
           path: steam-haptics-singer-windows-x64.zip
 
-  build-windows-arm64:
-    name: Build Windows ARM64 binary
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup MSYS2
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: UCRT64
-          update: true
-          install: >-
-            base-devel
-            zip
-            mingw-w64-ucrt-x86_64-clang
-            mingw-w64-ucrt-x86_64-lld
-            mingw-w64-ucrt-x86_64-pkgconf
-            mingw-w64-clang-aarch64-headers
-            mingw-w64-clang-aarch64-crt
-            mingw-w64-clang-aarch64-winpthreads
-            mingw-w64-clang-aarch64-libusb
-            mingw-w64-clang-aarch64-hidapi
-
-      - name: Build
-        shell: msys2 {0}
-        run: |
-          clang --target=aarch64-w64-windows-gnu --sysroot=/clangarm64 \
-            -c -o midifile.o midifile/midifile.c
-          clang++ --target=aarch64-w64-windows-gnu --sysroot=/clangarm64 \
-            -stdlib=libc++ \
-            -I/clangarm64/include/c++/v1 \
-            -I/clangarm64/include \
-            -I/clangarm64/include/hidapi \
-            -I/clangarm64/include/libusb-1.0 \
-            -fuse-ld=lld \
-            -L/clangarm64/lib \
-            -o steam-haptics-singer.exe main.cpp midifile.o \
-            -lusb-1.0 -lhidapi
-
-      - name: Bundle DLLs
-        shell: msys2 {0}
-        run: |
-          mkdir -p windows-arm64
-          cp steam-haptics-singer.exe windows-arm64/
-          objdump -p steam-haptics-singer.exe \
-            | grep "DLL Name" \
-            | awk '{print tolower($3)}' \
-            | while read dll; do
-                [ -f "/clangarm64/bin/$dll" ] && cp "/clangarm64/bin/$dll" windows-arm64/
-              done
-
-      - name: Zip
-        shell: msys2 {0}
-        run: cd windows-arm64 && zip -r ../steam-haptics-singer-windows-arm64.zip .
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: steam-haptics-singer-windows-arm64
-          path: steam-haptics-singer-windows-arm64.zip
-
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
@@ -167,7 +106,6 @@ jobs:
       - build-linux-x64
       - build-linux-arm64
       - build-windows-x64
-      - build-windows-arm64
     steps:
       - uses: actions/checkout@v4
 
@@ -183,5 +121,4 @@ jobs:
             steam-haptics-singer-linux-x64
             steam-haptics-singer-linux-arm64
             steam-haptics-singer-windows-x64.zip
-            steam-haptics-singer-windows-arm64.zip
           generate_release_notes: true
