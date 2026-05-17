@@ -131,6 +131,8 @@ jobs:
             -stdlib=libc++ \
             -I/clangarm64/include/c++/v1 \
             -I/clangarm64/include \
+            -I/clangarm64/include/hidapi \
+            -I/clangarm64/include/libusb-1.0 \
             -fuse-ld=lld \
             -L/clangarm64/lib \
             -o steam-haptics-singer.exe main.cpp midifile.o \
