@@ -15,6 +15,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#else
+#include <windows.h>
 #endif
 
 #include <hidapi.h>
@@ -400,6 +402,134 @@ bool captureSystemAudioToMidi(const ParamsStruct& params, std::string& generated
 }
 #endif // !_WIN32
 
+#ifdef _WIN32
+bool runCommand(const std::vector<std::string>& commandArgs){
+	if(commandArgs.empty()) return false;
+
+	std::string commandLine;
+	for(size_t i = 0; i < commandArgs.size(); i++){
+		if(i > 0) commandLine += " ";
+		bool needsQuotes = commandArgs[i].find_first_of(" \t") != std::string::npos;
+		if(needsQuotes) commandLine += "\"";
+		commandLine += commandArgs[i];
+		if(needsQuotes) commandLine += "\"";
+	}
+
+	STARTUPINFOA si;
+	PROCESS_INFORMATION pi;
+	ZeroMemory(&si, sizeof(si));
+	si.cb = sizeof(si);
+	ZeroMemory(&pi, sizeof(pi));
+
+	std::vector<char> cmdBuf(commandLine.begin(), commandLine.end());
+	cmdBuf.push_back('\0');
+
+	if(!CreateProcessA(NULL, cmdBuf.data(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)){
+		return false;
+	}
+
+	WaitForSingleObject(pi.hProcess, INFINITE);
+
+	DWORD exitCode = 1;
+	GetExitCodeProcess(pi.hProcess, &exitCode);
+
+	CloseHandle(pi.hProcess);
+	CloseHandle(pi.hThread);
+
+	return exitCode == 0;
+}
+
+bool removeDirectoryRecursively(const std::string& directoryPath){
+	WIN32_FIND_DATAA findData;
+	std::string searchPath = directoryPath + "\\*";
+	HANDLE hFind = FindFirstFileA(searchPath.c_str(), &findData);
+	if(hFind == INVALID_HANDLE_VALUE) return false;
+
+	bool isSuccess = true;
+	do{
+		if(strcmp(findData.cFileName, ".") == 0 || strcmp(findData.cFileName, "..") == 0) continue;
+		std::string childPath = directoryPath + "\\" + findData.cFileName;
+		if(findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY){
+			if(!removeDirectoryRecursively(childPath)) isSuccess = false;
+		}
+		else{
+			if(!DeleteFileA(childPath.c_str())) isSuccess = false;
+		}
+	} while(FindNextFileA(hFind, &findData));
+
+	FindClose(hFind);
+	if(!RemoveDirectoryA(directoryPath.c_str())) isSuccess = false;
+	return isSuccess;
+}
+
+bool captureSystemAudioToMidi(const ParamsStruct& params, std::string& generatedMidiPath){
+	std::string outputMidiPath = params.captureMidiOutput;
+
+	char tempPath[MAX_PATH];
+	if(GetTempPathA(MAX_PATH, tempPath) == 0){
+		cout << "Unable to get temporary directory." << endl;
+		return false;
+	}
+
+	// Create a uniquely named temp audio file with .wav extension
+	char tempAudioBuf[MAX_PATH];
+	if(GetTempFileNameA(tempPath, "sha", 0, tempAudioBuf) == 0){
+		cout << "Unable to create temporary audio file." << endl;
+		return false;
+	}
+	DeleteFileA(tempAudioBuf); // GetTempFileNameA creates a .TMP file; remove it so ffmpeg can write .wav
+	std::string tempAudioPath = std::string(tempAudioBuf);
+	size_t dotPos = tempAudioPath.rfind('.');
+	if(dotPos != std::string::npos) tempAudioPath = tempAudioPath.substr(0, dotPos) + ".wav";
+
+	// Create a uniquely named temp MIDI directory
+	char tempMidiDirBuf[MAX_PATH];
+	if(GetTempFileNameA(tempPath, "shm", 0, tempMidiDirBuf) == 0){
+		cout << "Unable to create temporary MIDI directory." << endl;
+		return false;
+	}
+	DeleteFileA(tempMidiDirBuf);
+	std::string tempMidiDirectory = tempMidiDirBuf;
+	if(!CreateDirectoryA(tempMidiDirectory.c_str(), NULL)){
+		cout << "Unable to create temporary MIDI directory." << endl;
+		return false;
+	}
+
+	if(!runCommand({"ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "dshow", "-i", "audio=Stereo Mix (Realtek High Definition Audio)", "-t", std::to_string(params.captureDurationSec), tempAudioPath})){
+		cout << "Audio capture failed. Ensure ffmpeg is installed and a loopback audio device (e.g. \"Stereo Mix\") is enabled in Windows Sound settings." << endl;
+		DeleteFileA(tempAudioPath.c_str());
+		removeDirectoryRecursively(tempMidiDirectory);
+		return false;
+	}
+
+	if(!runCommand({"basic-pitch", tempMidiDirectory, tempAudioPath})){
+		cout << "Audio-to-MIDI transcription failed. Ensure basic-pitch is installed and available in PATH." << endl;
+		DeleteFileA(tempAudioPath.c_str());
+		removeDirectoryRecursively(tempMidiDirectory);
+		return false;
+	}
+
+	size_t slashIndex = tempAudioPath.find_last_of("/\\");
+	std::string tempAudioName = (slashIndex == std::string::npos) ? tempAudioPath : tempAudioPath.substr(slashIndex + 1);
+	size_t extensionIndex = tempAudioName.find_last_of('.');
+	std::string tempAudioBaseName = (extensionIndex == std::string::npos) ? tempAudioName : tempAudioName.substr(0, extensionIndex);
+	std::string generatedTempMidiPath = tempMidiDirectory + "\\" + tempAudioBaseName + "_basic_pitch.mid";
+
+	if(!copyFile(generatedTempMidiPath, outputMidiPath)){
+		cout << "Failed to copy generated MIDI file to output path: " << outputMidiPath << endl;
+		DeleteFileA(tempAudioPath.c_str());
+		removeDirectoryRecursively(tempMidiDirectory);
+		return false;
+	}
+
+	DeleteFileA(tempAudioPath.c_str());
+	removeDirectoryRecursively(tempMidiDirectory);
+
+	generatedMidiPath = outputMidiPath;
+	return true;
+}
+#endif // _WIN32
+
 
 void displayPlayedNotes(int channel, int8_t note){
 	static int8_t notePerChannel[CHANNEL_COUNT] = {NOTE_STOP, NOTE_STOP, NOTE_STOP, NOTE_STOP};
@@ -572,16 +702,11 @@ bool parseArguments(int argc, char** argv, ParamsStruct* params){
 			}
 			break;
 		case 'a':
-#ifndef _WIN32
 			value = strtoul(optarg,NULL,10);
 			if(value > 0){
 				params->captureDurationSec = value;
 				params->captureSystemAudio = true;
 			}
-#else
-			cout << "System audio capture (-a) is not supported on Windows." << endl;
-			return false;
-#endif
 			break;
 		case 'o':
 			params->captureMidiOutput = optarg;
@@ -658,14 +783,13 @@ int main(int argc, char** argv)
 			  "\n  -e 	Direct velocity to gain control, the MIDI file will set the gain"
 			  "\n  -t	(Steam Controller 2026 Only) Limit to only two channels"
 			  "\n  -s	(Steam Controller 2026 Only) Swap rumble and trackpad channels"
-			  "\n  -a SECONDS	Capture system audio for N seconds and transcribe it to MIDI before playback (Linux/PulseAudio)"
+			  "\n  -a SECONDS	Capture system audio for N seconds and transcribe it to MIDI before playback (Linux: PulseAudio; Windows: DirectShow/Stereo Mix)"
 			  "\n  -o OUTPUT_MIDI	Output path for generated MIDI when using -a. Default: captured-audio.mid"
 				"" << endl;
 		return 1;
 	}
 
 	std::string generatedMidiPath;
-#ifndef _WIN32
 	if(params.captureSystemAudio){
 		cout << "Capturing system audio for " << params.captureDurationSec << " seconds..." << endl;
 		if(!captureSystemAudioToMidi(params, generatedMidiPath)){
@@ -674,7 +798,6 @@ int main(int argc, char** argv)
 		setMidiSong(&params, generatedMidiPath);
 		cout << "Generated MIDI file: " << params.midiSong << endl;
 	}
-#endif
 
 
 	//Initializing LIBUSB
