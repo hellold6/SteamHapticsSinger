@@ -106,6 +106,11 @@ MIDI files may need to be edited with a software such as [MidiEditor](https://ww
 
 You will need libusb(-dev), hidapi-hidraw, and pkgconf. If you have them, just type `make`.
 
+### For a guide:
+	git clone -b master https://github.com/CrazyCritic89/SteamHapticsSinger.git
+	cd SteamHapticsSinger
+	make
+
 ## Changelog
 
 [v1.11.1]
