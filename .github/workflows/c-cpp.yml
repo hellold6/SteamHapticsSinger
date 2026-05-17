@@ -72,16 +72,4 @@ jobs:
           mingw-w64-clang-aarch64-hidapi
     - name: Build
       shell: msys2 {0}
-      run: |
-        clang --target=aarch64-w64-windows-gnu --sysroot=/clangarm64 \
-          -c -o midifile.o midifile/midifile.c
-        clang++ --target=aarch64-w64-windows-gnu --sysroot=/clangarm64 \
-          -stdlib=libc++ \
-          -I/clangarm64/include/c++/v1 \
-          -I/clangarm64/include \
-          -I/clangarm64/include/hidapi \
-          -I/clangarm64/include/libusb-1.0 \
-          -fuse-ld=lld \
-          -L/clangarm64/lib \
-          -o steam-haptics-singer.exe main.cpp midifile.o \
-          -lusb-1.0 -lhidapi
+      run: make steam-haptics-singer-arm64.exe
