@@ -3,6 +3,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 #include <stdint-gcc.h>
 #include <unistd.h>
@@ -10,6 +11,9 @@
 
 #include <signal.h>
 #include <stdio.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 
 #include <hidapi.h>
 #include <libusb.h>
@@ -258,50 +262,106 @@ float timeElapsedSince(std::chrono::steady_clock::time_point tOrigin){
 	return time_span.count();
 }
 
-std::string shellEscape(const std::string& value){
-	std::string escaped = "'";
-	for(char ch : value){
-		if(ch == '\''){
-			escaped += "'\"'\"'";
-		}
-		else{
-			escaped += ch;
+void setMidiSong(ParamsStruct* params, const std::string& midiPath){
+	params->midiSongStorage = midiPath;
+	params->midiSong = params->midiSongStorage.c_str();
+}
+
+bool runCommand(const std::vector<std::string>& commandArgs){
+	if(commandArgs.empty()) return false;
+
+	std::vector<char*> argv;
+	for(const std::string& arg : commandArgs){
+		argv.push_back(const_cast<char*>(arg.c_str()));
+	}
+	argv.push_back(NULL);
+
+	pid_t pid = fork();
+	if(pid < 0) return false;
+	if(pid == 0){
+		execvp(argv[0], argv.data());
+		_exit(127);
+	}
+
+	int status = 0;
+	if(waitpid(pid, &status, 0) < 0) return false;
+	return WIFEXITED(status) && (WEXITSTATUS(status) == 0);
+}
+
+bool copyFile(const std::string& source, const std::string& destination){
+	FILE* sourceFile = fopen(source.c_str(), "rb");
+	if(!sourceFile) return false;
+	FILE* destinationFile = fopen(destination.c_str(), "wb");
+	if(!destinationFile){
+		fclose(sourceFile);
+		return false;
+	}
+
+	unsigned char buffer[8192];
+	size_t bytesRead = 0;
+	while((bytesRead = fread(buffer, 1, sizeof(buffer), sourceFile)) > 0){
+		if(fwrite(buffer, 1, bytesRead, destinationFile) != bytesRead){
+			fclose(sourceFile);
+			fclose(destinationFile);
+			return false;
 		}
 	}
-	escaped += "'";
-	return escaped;
+
+	fclose(sourceFile);
+	fclose(destinationFile);
+	return true;
 }
 
 bool captureSystemAudioToMidi(const ParamsStruct& params, std::string& generatedMidiPath){
 	std::string outputMidiPath = params.captureMidiOutput;
-	std::string tempAudioPath = "/tmp/steam-haptics-singer-capture.wav";
-	std::string tempMidiDirectory = "/tmp/steam-haptics-singer-midi";
 
-	std::string ffmpegCommand = "ffmpeg -hide_banner -loglevel error -y -f pulse -i default -t "
-		+ std::to_string(params.captureDurationSec) + " " + shellEscape(tempAudioPath);
-	if(system(ffmpegCommand.c_str()) != 0){
-		cout << "Unable to capture system audio. Make sure ffmpeg is installed and PulseAudio monitor capture is available." << endl;
+	char tempAudioTemplate[] = "/tmp/steam-haptics-singer-audio-XXXXXX.wav";
+	int tempAudioFd = mkstemps(tempAudioTemplate, 4);
+	if(tempAudioFd < 0){
+		cout << "Unable to create temporary audio file." << endl;
 		return false;
 	}
+	close(tempAudioFd);
+	std::string tempAudioPath = tempAudioTemplate;
 
-	std::string mkdirCommand = "mkdir -p " + shellEscape(tempMidiDirectory);
-	if(system(mkdirCommand.c_str()) != 0){
+	char tempMidiDirTemplate[] = "/tmp/steam-haptics-singer-midi-XXXXXX";
+	char* tempMidiDir = mkdtemp(tempMidiDirTemplate);
+	if(tempMidiDir == NULL){
 		cout << "Unable to create temporary MIDI directory." << endl;
+		unlink(tempAudioPath.c_str());
+		return false;
+	}
+	std::string tempMidiDirectory = tempMidiDir;
+
+	if(!runCommand({"ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "pulse", "-i", "default", "-t", std::to_string(params.captureDurationSec), tempAudioPath})){
+		cout << "Audio capture failed. Ensure ffmpeg is installed and system audio capture is accessible." << endl;
+		unlink(tempAudioPath.c_str());
+		rmdir(tempMidiDirectory.c_str());
 		return false;
 	}
 
-	std::string basicPitchCommand = "basic-pitch " + shellEscape(tempMidiDirectory) + " " + shellEscape(tempAudioPath);
-	if(system(basicPitchCommand.c_str()) != 0){
-		cout << "Unable to transcribe audio to MIDI. Make sure basic-pitch is installed and available in PATH." << endl;
+	if(!runCommand({"basic-pitch", tempMidiDirectory, tempAudioPath})){
+		cout << "Audio-to-MIDI transcription failed. Ensure basic-pitch is installed and available in PATH." << endl;
+		unlink(tempAudioPath.c_str());
+		rmdir(tempMidiDirectory.c_str());
 		return false;
 	}
 
-	std::string generatedTempMidiPath = tempMidiDirectory + "/steam-haptics-singer-capture_basic_pitch.mid";
-	std::string copyCommand = "cp " + shellEscape(generatedTempMidiPath) + " " + shellEscape(outputMidiPath);
-	if(system(copyCommand.c_str()) != 0){
-		cout << "Unable to copy generated MIDI file to output path (transcriber output may be missing): " << outputMidiPath << endl;
+	size_t slashIndex = tempAudioPath.find_last_of('/');
+	std::string tempAudioName = (slashIndex == std::string::npos) ? tempAudioPath : tempAudioPath.substr(slashIndex + 1);
+	size_t extensionIndex = tempAudioName.find_last_of('.');
+	std::string tempAudioBaseName = (extensionIndex == std::string::npos) ? tempAudioName : tempAudioName.substr(0, extensionIndex);
+	std::string generatedTempMidiPath = tempMidiDirectory + "/" + tempAudioBaseName + "_basic_pitch.mid";
+
+	if(!copyFile(generatedTempMidiPath, outputMidiPath)){
+		cout << "Failed to copy generated MIDI file to output path: " << outputMidiPath << endl;
+		unlink(tempAudioPath.c_str());
+		rmdir(tempMidiDirectory.c_str());
 		return false;
 	}
+
+	unlink(tempAudioPath.c_str());
+	rmdir(tempMidiDirectory.c_str());
 
 	generatedMidiPath = outputMidiPath;
 	return true;
@@ -511,13 +571,10 @@ bool parseArguments(int argc, char** argv, ParamsStruct* params){
 		}
 	}
 	if(params->captureSystemAudio){
-		params->midiSongStorage = params->captureMidiOutput;
-		params->midiSong = params->midiSongStorage.c_str();
 		return true;
 	}
 	if(optind == argc-1 ){
-		params->midiSongStorage = argv[optind];
-		params->midiSong = params->midiSongStorage.c_str();
+		setMidiSong(params, argv[optind]);
 		return true;
 	}
 	else{
@@ -575,8 +632,7 @@ int main(int argc, char** argv)
 		if(!captureSystemAudioToMidi(params, generatedMidiPath)){
 			return 1;
 		}
-		params.midiSongStorage = generatedMidiPath;
-		params.midiSong = params.midiSongStorage.c_str();
+		setMidiSong(&params, generatedMidiPath);
 		cout << "Generated MIDI file: " << params.midiSong << endl;
 	}
 
