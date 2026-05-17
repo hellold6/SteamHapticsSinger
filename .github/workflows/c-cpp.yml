@@ -7,10 +7,19 @@ on:
     branches: [ "master" ]
 
 jobs:
-  build:
-
+  build-linux-x64:
     runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libusb-1.0-0-dev libhidapi-dev pkg-config
+    - name: make
+      run: make
 
+  build-linux-arm64:
+    runs-on: ubuntu-24.04-arm
     steps:
     - uses: actions/checkout@v4
     - name: Install dependencies

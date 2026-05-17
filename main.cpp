@@ -787,16 +787,7 @@ bool parseArguments(int argc, char** argv, ParamsStruct* params){
 			break;
 		}
 	}
-	if(params->captureSystemAudio){
-		return true;
-	}
-	if(optind == argc-1 ){
-		setMidiSong(params, argv[optind]);
-		return true;
-	}
-	else{
-		return false;
-	}
+	return params->captureSystemAudio;
 }
 
 
@@ -834,20 +825,20 @@ int main(int argc, char** argv)
 
 	//Parse arguments
 	if(!parseArguments(argc, argv, &params)){
-		cout << "Usage: steam-haptics-singer [-p] [-d DEBUG_LEVEL] [-i INTERVAL] [-a SECONDS] [-o OUTPUT_MIDI] MIDI_FILE\n"
-			  "\n  -i INTERVAL		Player sleep interval (in microseconds). Lower generally means better song fidelity, but higher cpu usage, and at some point going lower won't improve any more. Default value is 10000"
-			  "\n  -d DEBUG_LEVEL	Libusb debug level. Default is 0, no debug output. max is 4, max verbosity output"
-		      "\n  -p	Repeat song, plays again after ending"
-			  "\n  -e 	Direct velocity to gain control, the MIDI file will set the gain"
-			  "\n  -t	(Steam Controller 2026 Only) Limit to only two channels"
-			  "\n  -s	(Steam Controller 2026 Only) Swap rumble and trackpad channels"
-			  "\n  -a SECONDS	Capture system audio for N seconds and transcribe it to MIDI before playback (Linux: PulseAudio; Windows: DirectShow/Stereo Mix)"
-			  "\n  -o OUTPUT_MIDI	Output path for generated MIDI when using -a. Default: captured-audio.mid"
+		cout << "Usage: steam-haptics-singer -a SECONDS [-o OUTPUT_MIDI] [options]\n"
+			  "\n  -a SECONDS      Capture system audio for N seconds and transcribe it to MIDI before playback (Linux: PulseAudio; Windows: DirectShow/Stereo Mix)"
+			  "\n  -o OUTPUT_MIDI  Output path for generated MIDI. Default: captured-audio.mid"
+			  "\n  -i INTERVAL     Player sleep interval (in microseconds). Default: 10000"
+			  "\n  -d DEBUG_LEVEL  Libusb debug level (0-4). Default: 0"
+			  "\n  -p              Repeat playback after ending"
+			  "\n  -e              Direct velocity to gain control"
+			  "\n  -t              (Steam Controller 2026 Only) Limit to only two channels"
+			  "\n  -s              (Steam Controller 2026 Only) Swap rumble and trackpad channels"
 #ifdef _WIN32
-			  "\n  -w DEVICE_NAME	(Windows) DirectShow audio device name for system audio capture. Default: \"Stereo Mix (Realtek High Definition Audio)\""
+			  "\n  -w DEVICE_NAME  (Windows) DirectShow audio device name for system audio capture. Default: \"Stereo Mix (Realtek High Definition Audio)\""
 			  "\n                   Run 'ffmpeg -f dshow -list_devices true -i dummy' to list available devices."
 #endif
-				"" << endl;
+			  "" << endl;
 		return 1;
 	}
 

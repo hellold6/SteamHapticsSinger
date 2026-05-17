@@ -9,8 +9,8 @@ permissions:
   contents: write
 
 jobs:
-  build-linux:
-    name: Build Linux binary
+  build-linux-x64:
+    name: Build Linux x64 binary
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,14 +23,40 @@ jobs:
       - name: Build
         run: make
 
-      - name: Upload Linux artifact
+      - name: Rename binary
+        run: mv steam-haptics-singer steam-haptics-singer-linux-x64
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: steam-haptics-singer-linux
-          path: steam-haptics-singer
+          name: steam-haptics-singer-linux-x64
+          path: steam-haptics-singer-linux-x64
 
-  build-windows:
-    name: Build Windows binary
+  build-linux-arm64:
+    name: Build Linux ARM64 binary
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libusb-1.0-0-dev libhidapi-dev pkg-config
+
+      - name: Build
+        run: make
+
+      - name: Rename binary
+        run: mv steam-haptics-singer steam-haptics-singer-linux-arm64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: steam-haptics-singer-linux-arm64
+          path: steam-haptics-singer-linux-arm64
+
+  build-windows-x64:
+    name: Build Windows x64 binary
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,38 +75,94 @@ jobs:
 
       - name: Build
         shell: msys2 {0}
-        run: |
-          make steam-haptics-singer.exe
+        run: make steam-haptics-singer.exe
 
-      - name: Upload Windows artifact
+      - name: Bundle DLLs
+        shell: msys2 {0}
+        run: |
+          mkdir -p windows-x64
+          cp steam-haptics-singer.exe windows-x64/
+          ldd steam-haptics-singer.exe \
+            | grep -iv 'system32\|windows\|SysWOW' \
+            | awk '{print $3}' \
+            | grep -v '^$' \
+            | xargs -I{} cp {} windows-x64/ 2>/dev/null || true
+
+      - name: Zip
+        shell: msys2 {0}
+        run: cd windows-x64 && zip -r ../steam-haptics-singer-windows-x64.zip .
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: steam-haptics-singer-windows
-          path: steam-haptics-singer.exe
+          name: steam-haptics-singer-windows-x64
+          path: steam-haptics-singer-windows-x64.zip
+
+  build-windows-arm64:
+    name: Build Windows ARM64 binary
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANGARM64
+          update: true
+          install: >-
+            base-devel
+            mingw-w64-clang-aarch64-toolchain
+            mingw-w64-clang-aarch64-libusb
+            mingw-w64-clang-aarch64-hidapi
+            mingw-w64-clang-aarch64-pkgconf
+
+      - name: Build
+        shell: msys2 {0}
+        run: make steam-haptics-singer.exe CC=clang CXX=clang++ PKG_CONFIG=pkgconf
+
+      - name: Bundle DLLs
+        shell: msys2 {0}
+        run: |
+          mkdir -p windows-arm64
+          cp steam-haptics-singer.exe windows-arm64/
+          ldd steam-haptics-singer.exe \
+            | grep -iv 'system32\|windows\|SysWOW' \
+            | awk '{print $3}' \
+            | grep -v '^$' \
+            | xargs -I{} cp {} windows-arm64/ 2>/dev/null || true
+
+      - name: Zip
+        shell: msys2 {0}
+        run: cd windows-arm64 && zip -r ../steam-haptics-singer-windows-arm64.zip .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: steam-haptics-singer-windows-arm64
+          path: steam-haptics-singer-windows-arm64.zip
 
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
     needs:
-      - build-linux
-      - build-windows
+      - build-linux-x64
+      - build-linux-arm64
+      - build-windows-x64
+      - build-windows-arm64
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download Linux artifact
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: steam-haptics-singer-linux
-
-      - name: Download Windows artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: steam-haptics-singer-windows
+          merge-multiple: true
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            steam-haptics-singer
-            steam-haptics-singer.exe
+            steam-haptics-singer-linux-x64
+            steam-haptics-singer-linux-arm64
+            steam-haptics-singer-windows-x64.zip
+            steam-haptics-singer-windows-arm64.zip
           generate_release_notes: true
