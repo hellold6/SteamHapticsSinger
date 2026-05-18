@@ -553,7 +553,7 @@ bool captureSystemAudioToMidi(const ParamsStruct& params, std::string& generated
 
 	if(!captureSucceeded){
 		cout << "Audio capture failed. Ensure ffmpeg is installed and a DirectShow audio device is available.\n"
-		     << "  Use -w \"Device Name\" to specify a capture device (e.g. \"Stereo Mix\").\n"
+		     << "  Use -w \"Device Name\" to specify a capture device (device names with spaces are handled automatically).\n"
 		     << "  Run 'ffmpeg -f dshow -list_devices true -i dummy' to list available devices.\n"
 		     << "  You may need to enable 'Stereo Mix' in Windows Sound settings (right-click the speaker icon -> Sounds -> Recording tab)." << endl;
 		DeleteFileA(tempAudioPath.c_str());
