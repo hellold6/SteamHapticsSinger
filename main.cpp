@@ -481,104 +481,6 @@ bool fileExists(const std::string& path){
 	return attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY);
 }
 
-std::string getExecutableDirectory(){
-	char exePath[MAX_PATH];
-	DWORD len = GetModuleFileNameA(NULL, exePath, MAX_PATH);
-	if(len == 0 || len == MAX_PATH) return ".";
-	std::string fullPath(exePath, len);
-	size_t slashPos = fullPath.find_last_of("/\\");
-	if(slashPos == std::string::npos) return ".";
-	return fullPath.substr(0, slashPos);
-}
-
-std::string getBundledWindowsFfmpegPath(){
-	return getExecutableDirectory() + "\\ffmpeg\\bin\\ffmpeg.exe";
-}
-
-void printInstallProgressBar(int step, int totalSteps, const std::string& label){
-	const int width = 30;
-	int filled = (step * width) / totalSteps;
-	cout << "[";
-	for(int i = 0; i < width; i++) cout << (i < filled ? "#" : "-");
-	cout << "] " << ((step * 100) / totalSteps) << "% - " << label << endl;
-}
-
-bool installWindowsFfmpegWithWasapi(){
-	const std::string archiveUrl = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip";
-	const std::string installRoot = getExecutableDirectory() + "\\ffmpeg";
-	const std::string bundledFfmpegPath = getBundledWindowsFfmpegPath();
-	const int installSteps = 4;
-
-	char tempPath[MAX_PATH];
-	if(GetTempPathA(MAX_PATH, tempPath) == 0){
-		cout << "Unable to get temporary directory for ffmpeg installation." << endl;
-		return false;
-	}
-
-	char tempScriptBuf[MAX_PATH];
-	char tempZipBuf[MAX_PATH];
-	char tempExtractBuf[MAX_PATH];
-	if(GetTempFileNameA(tempPath, "ps1", 0, tempScriptBuf) == 0 ||
-	   GetTempFileNameA(tempPath, "zip", 0, tempZipBuf) == 0 ||
-	   GetTempFileNameA(tempPath, "ffx", 0, tempExtractBuf) == 0){
-		cout << "Unable to create temporary files for ffmpeg installation." << endl;
-		return false;
-	}
-
-	std::string scriptPath = std::string(tempScriptBuf) + ".ps1";
-	std::string zipPath = std::string(tempZipBuf) + ".zip";
-	DeleteFileA(tempScriptBuf);
-	DeleteFileA(tempZipBuf);
-
-	std::string extractDirectory = tempExtractBuf;
-	DeleteFileA(extractDirectory.c_str());
-	if(!CreateDirectoryA(extractDirectory.c_str(), NULL)){
-		cout << "Unable to create temporary extraction directory for ffmpeg installation." << endl;
-		DeleteFileA(scriptPath.c_str());
-		DeleteFileA(zipPath.c_str());
-		return false;
-	}
-
-	const std::string scriptContent =
-		"param([string]$ZipPath, [string]$ExtractDir, [string]$InstallRoot)\n"
-		"$ErrorActionPreference = 'Stop'\n"
-		"Expand-Archive -LiteralPath $ZipPath -DestinationPath $ExtractDir -Force\n"
-		"$ffmpeg = Get-ChildItem -LiteralPath $ExtractDir -Filter ffmpeg.exe -Recurse | Select-Object -First 1\n"
-		"if (-not $ffmpeg) { throw 'ffmpeg.exe was not found in the downloaded archive.' }\n"
-		"$binDir = Join-Path $InstallRoot 'bin'\n"
-		"New-Item -ItemType Directory -Path $binDir -Force | Out-Null\n"
-		"Copy-Item -LiteralPath $ffmpeg.FullName -Destination (Join-Path $binDir 'ffmpeg.exe') -Force\n";
-
-	FILE* scriptFile = fopen(scriptPath.c_str(), "wb");
-	if(!scriptFile){
-		cout << "Unable to create temporary installer script." << endl;
-		DeleteFileA(scriptPath.c_str());
-		DeleteFileA(zipPath.c_str());
-		removeDirectoryRecursively(extractDirectory);
-		return false;
-	}
-	fwrite(scriptContent.c_str(), 1, scriptContent.size(), scriptFile);
-	fclose(scriptFile);
-
-	printInstallProgressBar(1, installSteps, "Preparing WASAPI-capable ffmpeg install");
-	printInstallProgressBar(2, installSteps, "Downloading ffmpeg archive (PowerShell shows download progress)");
-	bool downloadResult = runCommand({"powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
-	                                  "Invoke-WebRequest -Uri $args[0] -OutFile $args[1]",
-	                                  archiveUrl, zipPath});
-	bool installResult = false;
-	if(downloadResult){
-		printInstallProgressBar(3, installSteps, "Extracting and installing ffmpeg.exe");
-		installResult = runCommand({"powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath,
-		                            zipPath, extractDirectory, installRoot});
-	}
-	bool success = installResult && fileExists(bundledFfmpegPath);
-	printInstallProgressBar(4, installSteps, success ? "Install complete" : "Install failed");
-
-	DeleteFileA(scriptPath.c_str());
-	DeleteFileA(zipPath.c_str());
-	removeDirectoryRecursively(extractDirectory);
-	return success;
-}
 
 bool removeDirectoryRecursively(const std::string& directoryPath){
 	WIN32_FIND_DATAA findData;
@@ -643,32 +545,17 @@ bool captureSystemAudioToMidi(const ParamsStruct& params, std::string& generated
 		return false;
 	}
 
-	std::string wasapiDevice = params.winAudioDevice.empty() ? "loopback" : params.winAudioDevice;
-	std::string ffmpegBinary = fileExists(getBundledWindowsFfmpegPath()) ? getBundledWindowsFfmpegPath() : "ffmpeg";
-	auto runWindowsCapture = [&](const std::string& ffmpegPath){
-		return runCommand({ffmpegPath, "-hide_banner", "-loglevel", "error", "-y",
-		                   "-f", "wasapi",
-		                   "-i", wasapiDevice,
-		                   "-t", std::to_string(params.captureDurationSec), tempAudioPath});
-	};
-
-	bool captureSucceeded = runWindowsCapture(ffmpegBinary);
-	if(!captureSucceeded && ffmpegBinary == "ffmpeg"){
-		cout << "WASAPI capture failed with your current ffmpeg. Attempting automatic WASAPI-capable ffmpeg install..." << endl;
-		if(installWindowsFfmpegWithWasapi()){
-			ffmpegBinary = getBundledWindowsFfmpegPath();
-			cout << "Retrying capture with installed ffmpeg..." << endl;
-			captureSucceeded = runWindowsCapture(ffmpegBinary);
-		}
-	}
+	std::string dshowDevice = "audio=" + (params.winAudioDevice.empty() ? "Stereo Mix" : params.winAudioDevice);
+	bool captureSucceeded = runCommand({"ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+	                                    "-f", "dshow",
+	                                    "-i", dshowDevice,
+	                                    "-t", std::to_string(params.captureDurationSec), tempAudioPath});
 
 	if(!captureSucceeded){
-		cout << "Audio capture failed. Ensure ffmpeg is installed with WASAPI support.\n"
-		     << "  If ffmpeg reports 'Unknown input format: wasapi', your ffmpeg build lacks WASAPI support.\n"
-		     << "  Automatic install was attempted; if it failed, manually download a full-featured build from https://www.gyan.dev/ffmpeg/builds/.\n"
-		     << "  WASAPI loopback capture requires Windows 7 or later.\n"
-		     << "  To capture from a specific device, use -w \"Device Name\".\n"
-		     << "  Run 'ffmpeg -f wasapi -list_devices true -i dummy' to list available devices." << endl;
+		cout << "Audio capture failed. Ensure ffmpeg is installed and a DirectShow audio device is available.\n"
+		     << "  Use -w \"Device Name\" to specify a capture device (device names with spaces are handled automatically).\n"
+		     << "  Run 'ffmpeg -f dshow -list_devices true -i dummy' to list available devices.\n"
+		     << "  You may need to enable 'Stereo Mix' in Windows Sound settings (right-click the speaker icon -> Sounds -> Recording tab)." << endl;
 		DeleteFileA(tempAudioPath.c_str());
 		removeDirectoryRecursively(tempMidiDirectory);
 		return false;
@@ -953,7 +840,7 @@ int main(int argc, char** argv)
 	params.captureSystemAudio = false;
 	params.volume = 1.0f;
 #ifdef _WIN32
-	// Empty string = default output device for WASAPI loopback; override with -w for a specific device.
+	// Empty string = use "Stereo Mix" DirectShow device; override with -w for a specific device.
 	params.winAudioDevice = "";
 #endif
 	//params.leftGain = DEFAULT_GAIN;
@@ -963,7 +850,7 @@ int main(int argc, char** argv)
 	//Parse arguments
 	if(!parseArguments(argc, argv, &params)){
 		cout << "Usage: steam-haptics-singer -a SECONDS [-o OUTPUT_MIDI] [options]\n"
-			  "\n  -a SECONDS      Capture system audio for N seconds and transcribe it to MIDI before playback (Linux: PulseAudio; Windows: WASAPI loopback)"
+			  "\n  -a SECONDS      Capture system audio for N seconds and transcribe it to MIDI before playback (Linux: PulseAudio; Windows: DirectShow)"
 			  "\n  -o OUTPUT_MIDI  Output path for generated MIDI. Default: captured-audio.mid"
 			  "\n  -i INTERVAL     Player sleep interval (in microseconds). Default: 10000"
 			  "\n  -d DEBUG_LEVEL  Libusb debug level (0-4). Default: 0"
@@ -973,9 +860,9 @@ int main(int argc, char** argv)
 			  "\n  -t              (Steam Controller 2026 Only) Limit to only two channels"
 			  "\n  -s              (Steam Controller 2026 Only) Swap rumble and trackpad channels"
 #ifdef _WIN32
-			  "\n  -w DEVICE_NAME  (Windows) WASAPI render device name for audio capture. Default: system default output"
-			  "\n                   If WASAPI is missing in ffmpeg, this app automatically installs a local ffmpeg build and displays installation progress."
-			  "\n                   Run 'ffmpeg -f wasapi -list_devices true -i dummy' to list available devices."
+			  "\n  -w DEVICE_NAME  (Windows) DirectShow audio device name for capture. Default: Stereo Mix"
+			  "\n                   Run 'ffmpeg -f dshow -list_devices true -i dummy' to list available devices."
+			  "\n                   You may need to enable 'Stereo Mix' in Windows Sound settings."
 #endif
 			  "" << endl;
 		return 1;
